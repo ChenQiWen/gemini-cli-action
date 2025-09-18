@@ -1,5 +1,5 @@
 # 工作流名称
-name: '📋 Gemini Scheduled Issue Triage (可复用)'
+name: '📋 问题定时分类器 - 定期扫描未分类问题并批量处理'
 
 # 触发条件：定义为可被其他工作流调用
 on:

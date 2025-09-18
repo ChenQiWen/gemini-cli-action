@@ -1,5 +1,5 @@
 # 工作流名称
-name: '🏷️ Gemini Automated Issue Triage (可复用)'
+name: '🏷️ 问题自动分类器 - 实时分析新问题并自动添加标签'
 
 # 触发条件：定义为可被其他工作流调用
 on:

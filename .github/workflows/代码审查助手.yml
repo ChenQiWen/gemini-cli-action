@@ -1,5 +1,5 @@
 # 工作流名称
-name: '🧐 Gemini Pull Request Review (可复用)'
+name: '🧐 代码审查助手 - 智能分析代码变更并提供审查建议'
 
 # 触发条件：定义为可被其他工作流调用
 on:

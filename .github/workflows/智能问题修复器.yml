@@ -1,0 +1,310 @@
+# ===============================================
+# 🔧 智能问题修复器 - 自动生成代码修复方案
+# ===============================================
+# 
+# 🎯 用途：分析Issue描述，自动生成代码修复建议和补丁
+# 📋 功能：
+#   - Bug自动诊断和修复
+#   - 代码缺陷检测和修补
+#   - 性能优化建议
+#   - 安全漏洞修复
+# 
+# 🚀 触发：@abc fix this issue
+# 🤖 AI模型：Google Gemini API  
+# ===============================================
+
+name: 🔧 智能问题修复器 - 自动代码修复生成
+
+# 触发条件：可复用工作流
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: '需要修复的Issue编号'
+        required: true
+        type: number
+      issue_title:
+        description: 'Issue标题'
+        required: true
+        type: string
+      issue_body:
+        description: 'Issue描述内容'
+        required: true
+        type: string
+      fix_type:
+        description: '修复类型：bug|performance|security|enhancement'
+        required: false
+        type: string
+        default: 'bug'
+    secrets:
+      APP_PRIVATE_KEY:
+        required: false
+      GEMINI_API_KEY:
+        required: false
+
+# 权限设置
+permissions:
+  contents: write    # 需要创建修复分支和提交代码
+  pull-requests: write
+  issues: write
+
+jobs:
+  intelligent-fix:
+    name: 🔧 AI驱动的问题修复
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      # 步骤1: 检出代码
+      - name: 📥 检出代码仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整历史
+          
+      # 步骤2: 生成GitHub App Token
+      - name: 🔑 生成GitHub App Token
+        id: generate_token
+        if: ${{ vars.APP_ID != '' }}
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # 步骤3: 设置Git用户
+      - name: ⚙️ 配置Git用户信息
+        run: |
+          git config --global user.name 'ai-fixer[bot]'
+          git config --global user.email 'ai-fixer[bot]@users.noreply.github.com'
+
+      # 步骤4: 分析代码库结构
+      - name: 🔍 分析项目结构和代码
+        id: analyze_codebase
+        run: |
+          echo "📊 分析项目结构..."
+          
+          # 获取项目文件结构
+          find . -type f -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.go" -o -name "*.rs" | head -20 > /tmp/code_files.txt
+          
+          # 生成项目概览
+          {
+            echo "项目结构:"
+            tree -L 3 -I 'node_modules|.git|__pycache__|.pytest_cache' || ls -la
+            echo -e "\n主要代码文件:"
+            cat /tmp/code_files.txt
+            echo -e "\n最近提交:"
+            git log --oneline -5
+          } > /tmp/project_overview.txt
+          
+          # 设置输出变量
+          echo "project_overview<<EOF" >> $GITHUB_OUTPUT
+          cat /tmp/project_overview.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # 步骤5: AI分析和修复方案生成
+      - name: 🤖 AI问题分析与修复方案生成
+        id: ai_fix_analysis
+        uses: google-github-actions/run-gemini-cli@v0
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
+          ISSUE_TITLE: ${{ inputs.issue_title }}
+          ISSUE_BODY: ${{ inputs.issue_body }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          FIX_TYPE: ${{ inputs.fix_type }}
+          PROJECT_OVERVIEW: ${{ steps.analyze_codebase.outputs.project_overview }}
+        with:
+          gemini_cli_version: 'v0.1.12'
+          gcp_workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          gcp_project_id: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+          gcp_location: ${{ vars.GOOGLE_CLOUD_LOCATION }}
+          gcp_service_account: ${{ vars.SERVICE_ACCOUNT_EMAIL }}
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          use_vertex_ai: ${{ vars.GOOGLE_GENAI_USE_VERTEXAI }}
+          settings: |-
+            {
+              "debug": false,
+              "maxSessionTurns": 1,
+              "temperature": 0.2,
+              "candidateCount": 1,
+              "maxOutputTokens": 4000
+            }
+          prompt: |-
+            ## 角色
+            你是一个专业的代码修复专家，擅长分析问题并生成精确的修复方案。
+            
+            ## 任务
+            分析以下Issue并生成详细的修复方案，包括具体的代码更改建议。
+            
+            ## Issue信息
+            - **Issue #${ISSUE_NUMBER}**: ${ISSUE_TITLE}
+            - **修复类型**: ${FIX_TYPE}
+            - **问题描述**: 
+            ${ISSUE_BODY}
+            
+            ## 项目信息
+            ${PROJECT_OVERVIEW}
+            
+            ## 分析要求
+            请按以下步骤进行分析：
+            
+            1. **问题诊断**: 分析问题的根本原因
+            2. **影响评估**: 评估问题的影响范围和严重程度
+            3. **修复策略**: 制定修复策略和实施步骤
+            4. **代码建议**: 提供具体的代码修改建议
+            5. **测试建议**: 建议相应的测试用例
+            
+            ## 输出格式
+            请用markdown格式输出详细的分析报告：
+            
+            ```markdown
+            # Issue #${ISSUE_NUMBER} 修复分析报告
+            
+            ## 🔍 问题诊断
+            [详细分析问题的根本原因]
+            
+            ## 📊 影响评估
+            - **严重程度**: [Low/Medium/High/Critical]
+            - **影响范围**: [描述影响的功能模块]
+            - **用户影响**: [描述对用户的影响]
+            
+            ## 🛠️ 修复策略
+            [详细描述修复策略和实施步骤]
+            
+            ## 💻 代码修改建议
+            
+            ### 文件1: [文件路径]
+            ```语言
+            // 修改前
+            [原始代码]
+            
+            // 修改后  
+            [修复后的代码]
+            ```
+            
+            ### 文件2: [如果有其他文件需要修改]
+            [类似格式]
+            
+            ## 🧪 测试建议
+            [建议的测试用例和验证方法]
+            
+            ## ⚠️ 注意事项
+            [实施修复时需要注意的事项]
+            
+            ## 🔄 后续建议
+            [长期改进建议]
+            ```
+            
+            请确保修复建议具体、可执行，代码建议符合项目的编程规范。
+
+      # 步骤6: 创建修复分支
+      - name: 🌿 创建修复分支
+        id: create_branch
+        run: |
+          BRANCH_NAME="fix/issue-${{ inputs.issue_number }}-$(date +%Y%m%d-%H%M%S)"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          
+          git checkout -b "$BRANCH_NAME"
+          echo "✅ 创建修复分支: $BRANCH_NAME"
+
+      # 步骤7: 在Issue中发布修复分析报告
+      - name: 📝 发布修复分析报告
+        if: steps.ai_fix_analysis.outputs.summary != ''
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          FIX_ANALYSIS: ${{ steps.ai_fix_analysis.outputs.summary }}
+          BRANCH_NAME: ${{ steps.create_branch.outputs.branch_name }}
+        run: |
+          # 格式化分析报告
+          cat > /tmp/fix_report.md << 'EOF'
+          ## 🤖 AI自动修复分析报告
+          
+          我已经分析了这个问题，以下是详细的修复建议：
+          
+          ${{ env.FIX_ANALYSIS }}
+          
+          ---
+          
+          ### 📋 后续步骤
+          1. **审查建议**: 请仔细审查以上修复建议
+          2. **手动实施**: 根据建议手动实施代码修改
+          3. **创建PR**: 在分支 `${{ env.BRANCH_NAME }}` 上提交修改并创建PR
+          4. **测试验证**: 运行建议的测试用例验证修复效果
+          
+          ### 🔧 快速操作
+          ```bash
+          # 切换到修复分支
+          git checkout ${{ env.BRANCH_NAME }}
+          
+          # 实施修改后提交
+          git add .
+          git commit -m "fix: resolve issue #${{ inputs.issue_number }}"
+          git push origin ${{ env.BRANCH_NAME }}
+          ```
+          
+          > 💡 **提示**: 这是AI生成的修复建议，请在实施前仔细验证和测试。
+          EOF
+          
+          # 发布到Issue
+          gh issue comment "${{ env.ISSUE_NUMBER }}" --body-file /tmp/fix_report.md
+          
+          echo "✅ 修复分析报告已发布到Issue"
+
+      # 步骤8: 标记Issue状态
+      - name: 🏷️ 更新Issue标签
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          # 添加"AI分析完成"标签
+          gh issue edit "${{ env.ISSUE_NUMBER }}" --add-label "ai-analyzed,needs-fix" || true
+          
+          echo "✅ Issue标签已更新"
+
+      # 步骤9: 失败处理
+      - name: ❌ 修复分析失败处理
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          gh issue comment "${{ env.ISSUE_NUMBER }}" --body "❌ **AI修复分析失败**
+
+          很抱歉，AI修复分析过程中遇到了问题。请检查以下可能的原因：
+
+          1. 问题描述可能不够详细
+          2. 缺少必要的错误日志或代码片段  
+          3. AI服务暂时不可用
+
+          **建议操作**:
+          - 提供更详细的问题描述和错误信息
+          - 手动分析和修复问题
+          - 稍后重试AI分析
+
+          > 🔍 查看详细错误信息请参考 [Action日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+
+# ===============================================
+# 📋 使用说明
+# ===============================================
+#
+# 🎯 触发方式：
+#   在Issue或PR评论中使用: @abc fix this issue
+#
+# 📊 AI分析包括：
+#   - 问题根因分析
+#   - 修复策略制定  
+#   - 具体代码建议
+#   - 测试用例建议
+#
+# 🔧 支持的修复类型：
+#   - bug: Bug修复
+#   - performance: 性能优化
+#   - security: 安全漏洞修复
+#   - enhancement: 功能增强
+#
+# ⚡ 自动化功能：
+#   - 创建修复分支
+#   - 生成修复报告
+#   - 更新Issue标签
+#   - 提供操作指引
+#
+# ===============================================

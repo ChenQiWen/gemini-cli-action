@@ -1,0 +1,226 @@
+# ===============================================
+# 🚦 智能调度中心 - 统一AI助手入口和命令路由
+# ===============================================
+# 
+# 🎯 用途：作为所有AI功能的统一入口，根据事件类型和命令路由到对应工作流
+# 📋 功能：
+#   - 解析用户命令和意图
+#   - 智能路由到对应的AI工作流
+#   - 统一的权限和安全控制
+#   - 命令日志和审计
+# 
+# 🔗 依赖：调用其他AI助手工作流
+# 🤖 AI模型：Google Gemini API
+# ===============================================
+
+name: 🚦 智能调度中心 - AI助手统一入口
+
+# 🚀 触发条件：所有需要AI处理的GitHub事件
+on:
+  # 💬 评论事件 (包含命令)
+  issue_comment:
+    types: [created]
+    
+  # 🐛 Issue事件
+  issues:
+    types: [opened, reopened]
+    
+  # 📋 PR事件
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+# 📝 默认权限：只读，具体权限由子工作流控制
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  # ===============================
+  # 🧠 智能意图识别和路由
+  # ===============================
+  intelligent-routing:
+    name: 🧠 AI命令解析与路由
+    runs-on: ubuntu-latest
+    
+    # 🔄 输出：决定调用哪些子工作流
+    outputs:
+      need_pr_review: ${{ steps.router.outputs.need_pr_review }}
+      need_issue_triage: ${{ steps.router.outputs.need_issue_triage }}
+      need_ai_assistant: ${{ steps.router.outputs.need_ai_assistant }}
+      user_command: ${{ steps.router.outputs.user_command }}
+      action_type: ${{ steps.router.outputs.action_type }}
+    
+    steps:
+      # 步骤1: 分析事件类型和用户意图
+      - name: 🔍 分析事件和解析命令
+        id: router
+        run: |
+          echo "🎯 开始分析GitHub事件和用户意图..."
+          
+          # 获取事件信息
+          EVENT_NAME="${{ github.event_name }}"
+          echo "event_type=${EVENT_NAME}" >> $GITHUB_OUTPUT
+          
+          # 初始化输出变量
+          echo "need_pr_review=false" >> $GITHUB_OUTPUT
+          echo "need_issue_triage=false" >> $GITHUB_OUTPUT
+          echo "need_ai_assistant=false" >> $GITHUB_OUTPUT
+          echo "user_command=" >> $GITHUB_OUTPUT
+          echo "action_type=none" >> $GITHUB_OUTPUT
+          
+          # 根据事件类型决定路由
+          case "$EVENT_NAME" in
+            "pull_request")
+              echo "📋 检测到PR事件，启用代码审查"
+              echo "need_pr_review=true" >> $GITHUB_OUTPUT
+              echo "action_type=pr_review" >> $GITHUB_OUTPUT
+              ;;
+              
+            "issues")
+              echo "🐛 检测到Issue事件，启用问题分类"
+              echo "need_issue_triage=true" >> $GITHUB_OUTPUT
+              echo "action_type=issue_triage" >> $GITHUB_OUTPUT
+              ;;
+              
+            "issue_comment")
+              # 检查评论内容中的命令
+              COMMENT_BODY="${{ github.event.comment.body }}"
+              echo "💬 分析评论内容: $COMMENT_BODY"
+              
+              if echo "$COMMENT_BODY" | grep -q "@abc"; then
+                echo "🤖 检测到AI助手命令"
+                echo "need_ai_assistant=true" >> $GITHUB_OUTPUT
+                echo "user_command=$COMMENT_BODY" >> $GITHUB_OUTPUT
+                echo "action_type=ai_assistant" >> $GITHUB_OUTPUT
+                
+              elif echo "$COMMENT_BODY" | grep -qi "/review"; then
+                echo "🔍 检测到代码审查命令"
+                echo "need_pr_review=true" >> $GITHUB_OUTPUT
+                echo "action_type=manual_review" >> $GITHUB_OUTPUT
+                
+              elif echo "$COMMENT_BODY" | grep -qi "/triage"; then
+                echo "🏷️ 检测到问题分类命令"
+                echo "need_issue_triage=true" >> $GITHUB_OUTPUT
+                echo "action_type=manual_triage" >> $GITHUB_OUTPUT
+                
+              else
+                echo "❓ 未识别的命令，跳过处理"
+                echo "action_type=unknown" >> $GITHUB_OUTPUT
+              fi
+              ;;
+          esac
+          
+          echo "✅ 路由分析完成"
+
+  # ===============================
+  # 🔍 调用代码审查工作流
+  # ===============================
+  call-pr-review:
+    name: 🔍 调用代码审查助手
+    if: needs.intelligent-routing.outputs.need_pr_review == 'true'
+    needs: intelligent-routing
+    uses: ./.github/workflows/代码审查助手.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number || github.event.issue.number }}
+    secrets: inherit
+
+  # ===============================
+  # 🏷️ 调用问题分类工作流
+  # ===============================
+  call-issue-triage:
+    name: 🏷️ 调用问题自动分类器
+    if: needs.intelligent-routing.outputs.need_issue_triage == 'true'
+    needs: intelligent-routing
+    uses: ./.github/workflows/问题自动分类器.yml
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      issue_title: ${{ github.event.issue.title }}
+      issue_body: ${{ github.event.issue.body }}
+    secrets: inherit
+
+  # ===============================
+  # 🤖 调用AI助手工作流
+  # ===============================
+  call-ai-assistant:
+    name: 🤖 调用智能助手命令处理器
+    if: needs.intelligent-routing.outputs.need_ai_assistant == 'true'
+    needs: intelligent-routing
+    uses: ./.github/workflows/智能助手命令处理器.yml
+    with:
+      user_request: ${{ needs.intelligent-routing.outputs.user_command }}
+      issue_number: ${{ github.event.issue.number }}
+      is_pr: ${{ github.event.issue.pull_request != null }}
+    secrets: inherit
+
+  # ===============================
+  # 📊 执行结果汇总
+  # ===============================
+  summary-results:
+    name: 📊 AI处理结果汇总
+    if: always()
+    needs: [intelligent-routing, call-pr-review, call-issue-triage, call-ai-assistant]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📋 汇总处理结果
+        run: |
+          echo "🎯 AI助手处理汇总报告"
+          echo "==================="
+          echo "事件类型: ${{ needs.intelligent-routing.outputs.action_type }}"
+          echo "代码审查: ${{ needs.call-pr-review.result || 'skipped' }}"
+          echo "问题分类: ${{ needs.call-issue-triage.result || 'skipped' }}"
+          echo "AI助手: ${{ needs.call-ai-assistant.result || 'skipped' }}"
+          echo "==================="
+          
+          # 统计成功率
+          total=0
+          success=0
+          
+          if [ "${{ needs.call-pr-review.result }}" != "" ]; then
+            total=$((total + 1))
+            [ "${{ needs.call-pr-review.result }}" == "success" ] && success=$((success + 1))
+          fi
+          
+          if [ "${{ needs.call-issue-triage.result }}" != "" ]; then
+            total=$((total + 1))
+            [ "${{ needs.call-issue-triage.result }}" == "success" ] && success=$((success + 1))
+          fi
+          
+          if [ "${{ needs.call-ai-assistant.result }}" != "" ]; then
+            total=$((total + 1))
+            [ "${{ needs.call-ai-assistant.result }}" == "success" ] && success=$((success + 1))
+          fi
+          
+          if [ $total -gt 0 ]; then
+            success_rate=$((success * 100 / total))
+            echo "✅ 成功率: $success_rate% ($success/$total)"
+          else
+            echo "ℹ️ 本次未触发任何AI处理流程"
+          fi
+
+# ===============================================
+# 📋 使用说明
+# ===============================================
+#
+# 🎯 触发方式：
+#   1. 自动触发：
+#      - 创建/重开Issue → 自动分类
+#      - 创建/更新PR → 自动审查
+#   
+#   2. 手动命令：
+#      - @abc [请求] → AI助手处理
+#      - /review → 手动触发代码审查
+#      - /triage → 手动触发问题分类
+#
+# 🔧 扩展方法：
+#   - 在路由逻辑中添加新的命令识别
+#   - 创建新的子工作流并在此调用
+#   - 支持更复杂的AI意图理解
+#
+# 🛡️ 安全特性：
+#   - 只读权限，具体权限由子工作流控制
+#   - 统一的命令审计和日志
+#   - 支持权限隔离和访问控制
+#
+# ===============================================

@@ -87,7 +87,6 @@ jobs:
     name: 📅 定时批量问题处理
     # 🎯 条件：仅在定时任务触发时运行
     if: github.event_name == 'schedule'
-    continue-on-error: true  # AI功能失败时不影响其他步骤
     
     # 🔐 权限配置：批量处理所需权限
     permissions:

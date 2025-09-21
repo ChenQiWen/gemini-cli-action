@@ -98,7 +98,7 @@ jobs:
           AVAILABLE_LABELS: '${{ steps.get_labels.outputs.available_labels }}'
         with:
           # Gemini CLI 的配置
-          gemini_cli_version: '${{ vars.GEMINI_CLI_VERSION }}'
+          gemini_cli_version: 'v0.1.12'  # 使用最新稳定版本
           gcp_workload_identity_provider: '${{ vars.GCP_WIF_PROVIDER }}'
           gcp_project_id: '${{ vars.GOOGLE_CLOUD_PROJECT }}'
           gcp_location: '${{ vars.GOOGLE_CLOUD_LOCATION }}'
@@ -109,7 +109,10 @@ jobs:
           settings: |-
             {
               "debug": false,
-              "maxSessionTurns": 25
+              "maxSessionTurns": 25,
+              "responseFormat": "json",
+              "temperature": 0.1,
+              "candidateCount": 1
             }
           # ... 此处省略了长篇的 prompt ...
           prompt: |-

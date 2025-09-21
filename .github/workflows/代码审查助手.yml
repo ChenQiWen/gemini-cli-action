@@ -101,7 +101,7 @@ jobs:
           REPOSITORY: '${{ github.repository }}' # 当前仓库信息
         with:
           # Gemini CLI 的配置参数
-          gemini_cli_version: '${{ vars.GEMINI_CLI_VERSION }}' # CLI 版本
+          gemini_cli_version: 'v0.1.12'  # 使用最新稳定版本
           gcp_workload_identity_provider: '${{ vars.GCP_WIF_PROVIDER }}' # Google Cloud Workload Identity Provider
           gcp_project_id: '${{ vars.GOOGLE_CLOUD_PROJECT }}' # Google Cloud 项目 ID
           gcp_location: '${{ vars.GOOGLE_CLOUD_LOCATION }}' # Google Cloud 区域

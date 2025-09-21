@@ -199,12 +199,24 @@ jobs:
             JSON:
             {"labels_to_set":["label"],"explanation":"reason"}
 
-      # 步骤7: 将 Gemini 分析出的 Labels 应用到 Issue 上
-      # 使用原始结果或重试结果
+      # 步骤7: 调试输出内容
+      - name: 'Debug Output Analysis'
+        run: |
+          echo "=== 调试Gemini输出 ==="
+          echo "原始分析输出:"
+          echo "${{ steps.gemini_issue_analysis.outputs.summary }}"
+          echo "--- 分隔线 ---"
+          echo "重试分析输出:"
+          echo "${{ steps.gemini_retry.outputs.summary }}"
+          echo "--- 分隔线 ---"
+          echo "最终使用的输出:"
+          echo "${{ steps.gemini_retry.outputs.summary || steps.gemini_issue_analysis.outputs.summary }}"
+          echo "==================="
+
+      # 步骤8: 将 Gemini 分析出的 Labels 应用到 Issue 上
+      # 简化条件：只要有任何输出就尝试处理
       - name: 'Apply Labels to Issue'
-        if: >-
-          (steps.gemini_issue_analysis.outputs.summary != '' && startsWith(steps.gemini_issue_analysis.outputs.summary, '{')) ||
-          (steps.gemini_retry.outputs.summary != '' && startsWith(steps.gemini_retry.outputs.summary, '{'))
+        if: steps.gemini_issue_analysis.outputs.summary != '' || steps.gemini_retry.outputs.summary != ''
         env:
           REPOSITORY: '${{ github.repository }}'
           ISSUE_NUMBER: '${{ inputs.issue_number }}'
@@ -216,15 +228,57 @@ jobs:
           script: |-
             // 解析 Gemini 输出的 JSON 字符串
             const rawLabels = process.env.LABELS_OUTPUT;
-            core.info(`Raw labels JSON: ${rawLabels}`);
+            core.info(`🔍 Raw labels output: ${rawLabels}`);
+            
+            if (!rawLabels || rawLabels.trim() === '') {
+              core.warning('❌ 没有收到Gemini输出，跳过打标流程');
+              return;
+            }
+            
             let parsedLabels;
             try {
-              const trimmedLabels = rawLabels.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
-              parsedLabels = JSON.parse(trimmedLabels);
-              core.info(`Parsed labels JSON: ${JSON.stringify(parsedLabels)}`);
+              // 多层清理：移除markdown代码块、前后空白、对话式前缀
+              let cleanedLabels = rawLabels
+                .replace(/^```(?:json)?\s*/, '')  // 移除开头的```json
+                .replace(/\s*```$/, '')           // 移除结尾的```
+                .replace(/^(?:Got it|I am ready|Understood)[.!]*\s*/i, '') // 移除对话式开头
+                .trim();
+              
+              // 如果不是以{开头，尝试找到JSON部分
+              if (!cleanedLabels.startsWith('{')) {
+                const jsonMatch = cleanedLabels.match(/\{[^}]*\}/);
+                if (jsonMatch) {
+                  cleanedLabels = jsonMatch[0];
+                  core.info(`🔧 从文本中提取JSON: ${cleanedLabels}`);
+                }
+              }
+              
+              parsedLabels = JSON.parse(cleanedLabels);
+              core.info(`✅ 成功解析标签JSON: ${JSON.stringify(parsedLabels)}`);
             } catch (err) {
-              core.setFailed(`Failed to parse labels JSON from Gemini output: ${err.message}\nRaw output: ${rawLabels}`);
-              return;
+              core.warning(`⚠️ JSON解析失败: ${err.message}`);
+              core.warning(`原始输出: ${rawLabels}`);
+              
+              // 尝试应急处理：如果包含已知标签，手动创建JSON
+              const emergencyLabels = [];
+              const availableLabels = ['bug', 'enhancement', 'question', 'documentation', 'duplicate', 'good first issue', 'help wanted'];
+              
+              for (const label of availableLabels) {
+                if (rawLabels.toLowerCase().includes(label.toLowerCase())) {
+                  emergencyLabels.push(label);
+                }
+              }
+              
+              if (emergencyLabels.length > 0) {
+                parsedLabels = { 
+                  labels_to_set: emergencyLabels, 
+                  explanation: "应急模式：从文本中检测到的标签" 
+                };
+                core.info(`🚨 应急模式激活，检测到标签: ${JSON.stringify(emergencyLabels)}`);
+              } else {
+                core.setFailed(`无法解析Gemini输出为JSON，且未检测到已知标签。原始输出: ${rawLabels}`);
+                return;
+              }
             }
 
             const issueNumber = parseInt(process.env.ISSUE_NUMBER);

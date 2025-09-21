@@ -138,7 +138,22 @@ jobs:
             - Maximum 3 labels
             - Empty array if no suitable labels
 
-      # 步骤5: 重试机制 - 如果第一次失败且返回了对话式文本，则重试
+      # 步骤5: 清理CLI目录为重试做准备
+      - name: 'Clean CLI for retry (if needed)'
+        if: >-
+          steps.gemini_issue_analysis.outputs.summary != '' &&
+          (contains(steps.gemini_issue_analysis.outputs.summary, 'Got it') ||
+           contains(steps.gemini_issue_analysis.outputs.summary, 'I am ready') ||
+           contains(steps.gemini_issue_analysis.outputs.summary, 'Understood') ||
+           !startsWith(steps.gemini_issue_analysis.outputs.summary, '{'))
+        run: |
+          echo "🔄 检测到非JSON响应，准备重试..."
+          echo "原始响应: ${{ steps.gemini_issue_analysis.outputs.summary }}"
+          # 清理CLI安装目录避免冲突
+          rm -rf ./gemini-cli ./gemini 2>/dev/null || true
+          echo "✅ CLI目录已清理"
+
+      # 步骤6: 重试机制 - 使用更严格的配置重新运行
       - name: 'Retry Gemini Analysis (if needed)'
         id: 'gemini_retry'
         if: >-
@@ -170,21 +185,21 @@ jobs:
               "debug": false,
               "temperature": 0.0,
               "candidateCount": 1,
-              "maxOutputTokens": 1024,
+              "maxOutputTokens": 512,
               "responseMimeType": "application/json",
               "systemInstruction": "CRITICAL: You are a JSON-only system. Never respond with conversational text. Only output valid JSON format."
             }
           prompt: |-
-            OUTPUT ONLY JSON - NO OTHER TEXT ALLOWED
+            JSON ONLY - NO OTHER TEXT
             
             Issue: ${ISSUE_TITLE}
             Body: ${ISSUE_BODY}
             Labels: ${AVAILABLE_LABELS}
             
-            Required JSON format:
-            {"labels_to_set":["label1"],"explanation":"reason"}
+            JSON:
+            {"labels_to_set":["label"],"explanation":"reason"}
 
-      # 步骤6: 将 Gemini 分析出的 Labels 应用到 Issue 上
+      # 步骤7: 将 Gemini 分析出的 Labels 应用到 Issue 上
       # 使用原始结果或重试结果
       - name: 'Apply Labels to Issue'
         if: >-

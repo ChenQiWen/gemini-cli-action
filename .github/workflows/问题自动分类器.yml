@@ -99,63 +99,42 @@ jobs:
         with:
           # Gemini CLI 的配置
           gemini_cli_version: 'v0.1.12'  # 使用最新稳定版本
+          gemini_api_key: '${{ secrets.GEMINI_API_KEY }}'
+          gemini_debug: false  # 关闭调试模式
           gcp_workload_identity_provider: '${{ vars.GCP_WIF_PROVIDER }}'
           gcp_project_id: '${{ vars.GOOGLE_CLOUD_PROJECT }}'
           gcp_location: '${{ vars.GOOGLE_CLOUD_LOCATION }}'
           gcp_service_account: '${{ vars.SERVICE_ACCOUNT_EMAIL }}'
-          gemini_api_key: '${{ secrets.GEMINI_API_KEY }}'
           use_vertex_ai: '${{ vars.GOOGLE_GENAI_USE_VERTEXAI }}'
           use_gemini_code_assist: '${{ vars.GOOGLE_GENAI_USE_GCA }}'
           settings: |-
             {
               "debug": false,
-              "maxSessionTurns": 1,
               "temperature": 0.0,
               "candidateCount": 1,
-              "maxOutputTokens": 1000,
-              "systemInstruction": "You are a JSON-only response system. Always respond with valid JSON format only."
+              "maxOutputTokens": 2048,
+              "responseMimeType": "application/json"
             }
           prompt: |-
-            ## Role
-            You are an issue triage assistant that analyzes GitHub issues and assigns appropriate labels.
+            You are an issue triage assistant. Analyze the GitHub issue and return a JSON response with appropriate labels.
             
-            ## Task
-            Analyze the provided issue and return ONLY a JSON object with the appropriate labels.
+            Repository: ${REPOSITORY}
+            Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+            Issue Body: ${ISSUE_BODY}
             
-            ## Available Labels
-            Here are the available labels for this repository:
-            ${AVAILABLE_LABELS}
+            Available Labels: ${AVAILABLE_LABELS}
             
-            ## Issue Information
-            - **Repository**: ${REPOSITORY}
-            - **Issue #${ISSUE_NUMBER}**: ${ISSUE_TITLE}
-            - **Content**: ${ISSUE_BODY}
-            
-            ## Output Format
-            You MUST respond with ONLY a valid JSON object in this exact format:
-            ```json
+            Return a JSON object with this structure:
             {
               "labels_to_set": ["label1", "label2"],
-              "explanation": "Brief explanation of why these labels were chosen"
+              "explanation": "Brief explanation"
             }
-            ```
             
-            ## Rules
-            1. ONLY use labels from the available labels list above
-            2. Return ONLY the JSON object, no other text or explanations outside the JSON
-            3. Use between 1-3 most relevant labels
-            4. If no suitable labels exist, return empty array: "labels_to_set": []
-            5. Keep explanation brief (one sentence)
-            
-            ## Examples
-            ```json
-            {
-              "labels_to_set": ["bug", "high-priority"],
-              "explanation": "This appears to be a critical bug affecting core functionality"
-            }
-            ```
-            
-            Analyze the issue and respond with the JSON object now:
+            Rules:
+            - Only use labels from the available labels list
+            - Select 1-3 most relevant labels
+            - If no suitable labels exist, use empty array
+            - Keep explanation to one sentence
 
       # 步骤5: 将 Gemini 分析出的 Labels 应用到 Issue 上
       # 仅当上一步 Gemini 成功输出了分析结果时执行

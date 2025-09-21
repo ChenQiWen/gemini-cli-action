@@ -102,11 +102,12 @@ jobs:
         with:
           # Gemini CLI 的配置参数
           gemini_cli_version: 'v0.1.12'  # 使用最新稳定版本
+          gemini_api_key: '${{ secrets.GEMINI_API_KEY }}' # Gemini API 密钥
+          gemini_debug: false  # 关闭调试模式
           gcp_workload_identity_provider: '${{ vars.GCP_WIF_PROVIDER }}' # Google Cloud Workload Identity Provider
           gcp_project_id: '${{ vars.GOOGLE_CLOUD_PROJECT }}' # Google Cloud 项目 ID
           gcp_location: '${{ vars.GOOGLE_CLOUD_LOCATION }}' # Google Cloud 区域
           gcp_service_account: '${{ vars.SERVICE_ACCOUNT_EMAIL }}' # Google Cloud 服务账号
-          gemini_api_key: '${{ secrets.GEMINI_API_KEY }}' # Gemini API 密钥
           use_vertex_ai: '${{ vars.GOOGLE_GENAI_USE_VERTEXAI }}' # 是否使用 Vertex AI
           use_gemini_code_assist: '${{ vars.GOOGLE_GENAI_USE_GCA }}' # 是否使用 Gemini Code Assist
           settings: |-

@@ -127,16 +127,19 @@ jobs:
               "temperature": 0.0,
               "candidateCount": 1,
               "maxOutputTokens": 4096,
-              "responseMimeType": "application/json"
+              "responseMimeType": "application/json",
+              "systemInstruction": "You are a JSON-only response system. You MUST respond with valid JSON format only, never with conversational text."
             }
           prompt: |-
-            You are an issue triage assistant. Analyze the GitHub issues and return a JSON response with appropriate labels for each.
+            IMPORTANT: Respond ONLY with valid JSON array. Do not include any conversational text.
+            
+            Process these GitHub issues and return JSON labels:
             
             Repository: ${REPOSITORY}
             Available Labels: ${AVAILABLE_LABELS}
-            Issues to Process: ${ISSUES_TO_TRIAGE}
+            Issues: ${ISSUES_TO_TRIAGE}
             
-            Return a JSON array with this structure:
+            Required JSON array format:
             [
               {
                 "issue_number": 123,
@@ -146,11 +149,10 @@ jobs:
             ]
             
             Rules:
-            - Only use labels from the available labels list
-            - Select 1-3 most relevant labels per issue
-            - If no suitable labels exist, use empty array
-            - Keep explanations to one sentence
-            - Include all issues from the input list
+            - ONLY valid JSON array response
+            - Use only labels from available list
+            - Maximum 3 labels per issue
+            - Include all issues
 
       # 步骤6: 将分析出的 Labels 应用到对应的 Issues
       # 仅当上一步 Gemini 成功运行并返回了非空结果时执行

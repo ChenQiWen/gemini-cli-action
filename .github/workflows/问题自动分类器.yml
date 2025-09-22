@@ -117,14 +117,33 @@ jobs:
               "systemInstruction": "You are a JSON-only response system. You MUST respond with valid JSON format only, never with conversational text."
             }
           prompt: |-
-            IMPORTANT: Respond ONLY with valid JSON. Do not include any conversational text, explanations, or acknowledgments.
+            IMPORTANT: Respond ONLY with valid JSON. No conversational text.
             
-            Analyze this GitHub issue and suggest appropriate labels:
+            Classify this GitHub issue by analyzing its content and selecting appropriate labels:
             
             Repository: ${REPOSITORY}
             Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
             Issue Body: ${ISSUE_BODY}
-            Existing Labels: ${AVAILABLE_LABELS}
+            Available Labels: ${AVAILABLE_LABELS}
+            
+            CLASSIFICATION GUIDE:
+            - BUG: Errors, crashes, unexpected behavior, "不工作", "报错", "白屏", "失败"
+            - 增强: New features, improvements, "希望", "建议", "新增", "优化"
+            - 文档: Documentation issues, "文档", "说明", "API文档"
+            - 问题: Questions, help requests, "如何", "求助", "怎么"
+            - 重复: Duplicate issues
+            - 好的首发议题: Simple issues for beginners
+            - 需要帮助: Complex issues needing assistance
+            - 无效: Invalid or spam issues
+            - 不会修复: Issues that won't be fixed
+            - design: UI/UX design related
+            - refactor: Code restructuring
+            
+            EXAMPLES:
+            "用户登录后页面白屏" → BUG
+            "希望增加暗色主题" → 增强
+            "API文档缺少说明" → 文档
+            "如何配置SSL证书" → 问题
             
             Response format (JSON only):
             {
@@ -132,19 +151,18 @@ jobs:
               "new_labels": [
                 {
                   "name": "new-label-name",
-                  "description": "Clear description of when to use this label",
+                  "description": "Description",
                   "color": "FF6B6B"
                 }
               ],
-              "explanation": "Brief explanation for the classification"
+              "explanation": "Brief reason"
             }
             
-            INTELLIGENT RULES:
-            - First try to use existing labels that match the issue
-            - If no existing labels fit well, suggest creating new ones
-            - New label names should be descriptive and lowercase-with-hyphens
-            - Maximum 3 labels total (existing + new combined)
-            - Choose appropriate colors for new labels (hex without #)
+            RULES:
+            - Match issue content to appropriate existing labels FIRST
+            - Only create new labels if existing ones don't fit well
+            - Maximum 3 labels total
+            - Be specific and accurate
 
       # 步骤5: 清理CLI目录为重试做准备
       - name: 'Clean CLI for retry (if needed)'
@@ -202,16 +220,22 @@ jobs:
             
             Issue: ${ISSUE_TITLE}
             Body: ${ISSUE_BODY}
-            Existing: ${AVAILABLE_LABELS}
+            Labels: ${AVAILABLE_LABELS}
             
-            JSON FORMAT:
+            GUIDE:
+            "白屏"/"报错"/"undefined"→BUG
+            "希望"/"建议"→增强
+            "文档"→文档
+            "如何"→问题
+            
+            JSON:
             {
-              "existing_labels": ["existing-label"],
-              "new_labels": [{"name": "new-label", "description": "desc", "color": "FF6B6B"}],
+              "existing_labels": ["BUG"],
+              "new_labels": [],
               "explanation": "reason"
             }
             
-            RULES: Prefer existing labels, create new ones if needed
+            RULE: Use existing labels first, be accurate
 
       # 步骤7: 调试输出内容
       - name: 'Debug Output Analysis'

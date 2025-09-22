@@ -131,13 +131,31 @@ jobs:
               "systemInstruction": "You are a JSON-only response system. You MUST respond with valid JSON format only, never with conversational text."
             }
           prompt: |-
-            IMPORTANT: Respond ONLY with valid JSON array. Do not include any conversational text.
+            IMPORTANT: Respond ONLY with valid JSON array. No conversational text.
             
-            Process these GitHub issues and return JSON labels:
+            Classify these GitHub issues by analyzing content and selecting appropriate labels:
             
             Repository: ${REPOSITORY}
-            Existing Labels: ${AVAILABLE_LABELS}
+            Available Labels: ${AVAILABLE_LABELS}
             Issues: ${ISSUES_TO_TRIAGE}
+            
+            CLASSIFICATION GUIDE:
+            - BUG: Errors, crashes, unexpected behavior, "不工作", "报错", "白屏", "失败"
+            - 增强: New features, improvements, "希望", "建议", "新增", "优化"
+            - 文档: Documentation issues, "文档", "说明", "API文档"
+            - 问题: Questions, help requests, "如何", "求助", "怎么"
+            - 重复: Duplicate issues
+            - 好的首发议题: Simple issues for beginners
+            - 需要帮助: Complex issues needing assistance
+            - 无效: Invalid or spam issues
+            - 不会修复: Issues that won't be fixed
+            - design: UI/UX design related
+            - refactor: Code restructuring
+            
+            EXAMPLES:
+            "用户登录后页面白屏" → BUG
+            "希望增加暗色主题" → 增强
+            "API文档缺少说明" → 文档
             
             Required JSON array format:
             [
@@ -147,22 +165,20 @@ jobs:
                 "new_labels": [
                   {
                     "name": "new-label-name",
-                    "description": "Clear description",
+                    "description": "Description",
                     "color": "FF6B6B"
                   }
                 ],
-                "explanation": "Brief explanation"
+                "explanation": "Brief reason"
               }
             ]
             
-            INTELLIGENT RULES:
-            - ONLY valid JSON array response
-            - First try to use existing labels from the available list
-            - If no existing labels fit well, suggest creating new ones
-            - New label names should be descriptive and lowercase-with-hyphens
-            - Maximum 3 labels per issue (existing + new combined)
-            - Include all issues in the response
-            - Choose appropriate colors for new labels (hex without #)
+            RULES:
+            - Match issue content to existing labels FIRST
+            - Only create new labels if existing ones don't fit well
+            - Maximum 3 labels per issue
+            - Include all issues in response
+            - Be specific and accurate
 
       # 步骤6: 将分析出的 Labels 应用到对应的 Issues
       # 仅当上一步 Gemini 成功运行并返回了非空结果时执行

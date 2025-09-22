@@ -119,27 +119,32 @@ jobs:
           prompt: |-
             IMPORTANT: Respond ONLY with valid JSON. Do not include any conversational text, explanations, or acknowledgments.
             
-            Analyze this GitHub issue and return JSON labels:
+            Analyze this GitHub issue and suggest appropriate labels:
             
             Repository: ${REPOSITORY}
             Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
             Issue Body: ${ISSUE_BODY}
-            
-            CRITICAL: ONLY use labels from this exact list: ${AVAILABLE_LABELS}
+            Existing Labels: ${AVAILABLE_LABELS}
             
             Response format (JSON only):
             {
-              "labels_to_set": ["label1", "label2"],
-              "explanation": "Brief explanation"
+              "existing_labels": ["label1", "label2"],
+              "new_labels": [
+                {
+                  "name": "new-label-name",
+                  "description": "Clear description of when to use this label",
+                  "color": "FF6B6B"
+                }
+              ],
+              "explanation": "Brief explanation for the classification"
             }
             
-            STRICT RULES:
-            - ONLY valid JSON response
-            - MUST use labels ONLY from the available list above
-            - DO NOT create new labels
-            - Maximum 3 labels
-            - Empty array if no suitable labels from the available list
-            - If available list is empty, return empty array
+            INTELLIGENT RULES:
+            - First try to use existing labels that match the issue
+            - If no existing labels fit well, suggest creating new ones
+            - New label names should be descriptive and lowercase-with-hyphens
+            - Maximum 3 labels total (existing + new combined)
+            - Choose appropriate colors for new labels (hex without #)
 
       # 步骤5: 清理CLI目录为重试做准备
       - name: 'Clean CLI for retry (if needed)'
@@ -197,13 +202,16 @@ jobs:
             
             Issue: ${ISSUE_TITLE}
             Body: ${ISSUE_BODY}
+            Existing: ${AVAILABLE_LABELS}
             
-            MUST ONLY USE LABELS FROM: ${AVAILABLE_LABELS}
+            JSON FORMAT:
+            {
+              "existing_labels": ["existing-label"],
+              "new_labels": [{"name": "new-label", "description": "desc", "color": "FF6B6B"}],
+              "explanation": "reason"
+            }
             
-            JSON FORMAT REQUIRED:
-            {"labels_to_set":["label"],"explanation":"reason"}
-            
-            RULES: Only use exact labels from list above, no new labels allowed
+            RULES: Prefer existing labels, create new ones if needed
 
       # 步骤7: 调试输出内容
       - name: 'Debug Output Analysis'
@@ -285,7 +293,8 @@ jobs:
               
               if (emergencyLabels.length > 0) {
                 parsedLabels = { 
-                  labels_to_set: emergencyLabels, 
+                  existing_labels: emergencyLabels,
+                  new_labels: [],
                   explanation: "应急模式：从文本中检测到的标签" 
                 };
                 core.info(`🚨 应急模式激活，检测到标签: ${JSON.stringify(emergencyLabels)}`);
@@ -302,38 +311,90 @@ jobs:
             const availableLabels = availableLabelsStr.split(',').map(l => l.trim()).filter(l => l);
             core.info(`📋 仓库可用标签: ${availableLabels.join(', ')}`);
 
-            // 如果 JSON 中包含要设置的 labels，则进行验证并调用 GitHub API
-            if (parsedLabels.labels_to_set && parsedLabels.labels_to_set.length > 0) {
-              // 过滤出实际存在的标签
-              const validLabels = parsedLabels.labels_to_set.filter(label => {
-                const labelExists = availableLabels.some(availableLabel => 
-                  availableLabel.toLowerCase() === label.toLowerCase()
-                );
-                if (!labelExists) {
-                  core.warning(`⚠️ 标签 "${label}" 在仓库中不存在，将被跳过`);
-                }
-                return labelExists;
-              });
+            // 处理智能标签建议
+            const existingLabelsToUse = parsedLabels.existing_labels || [];
+            const newLabelsToCreate = parsedLabels.new_labels || [];
+            
+            core.info(`🔍 建议使用现有标签: ${existingLabelsToUse.join(', ')}`);
+            core.info(`🆕 建议创建新标签: ${newLabelsToCreate.map(l => l.name).join(', ')}`);
+            
+            // 验证现有标签是否真的存在
+            const validExistingLabels = existingLabelsToUse.filter(label => {
+              const labelExists = availableLabels.some(availableLabel => 
+                availableLabel.toLowerCase() === label.toLowerCase()
+              );
+              if (!labelExists) {
+                core.warning(`⚠️ 建议的现有标签 "${label}" 实际不存在`);
+              }
+              return labelExists;
+            });
+            
+            // 智能颜色选择函数
+            function getSmartColor(labelName, providedColor) {
+              if (providedColor && /^[0-9A-Fa-f]{6}$/.test(providedColor)) {
+                return providedColor;
+              }
               
-              core.info(`🔍 Gemini建议的标签: ${parsedLabels.labels_to_set.join(', ')}`);
-              core.info(`✅ 验证后的有效标签: ${validLabels.join(', ')}`);
+              // 根据标签名称选择合适的颜色
+              const name = labelName.toLowerCase();
+              if (name.includes('bug') || name.includes('error') || name.includes('issue')) return 'D73A49'; // 红色
+              if (name.includes('feature') || name.includes('enhancement') || name.includes('improvement')) return '0E8A16'; // 绿色
+              if (name.includes('docs') || name.includes('documentation')) return '1D76DB'; // 蓝色
+              if (name.includes('security') || name.includes('vulnerability')) return 'D93F0B'; // 橙色
+              if (name.includes('performance') || name.includes('optimization')) return '5319E7'; // 紫色
+              if (name.includes('ui') || name.includes('ux') || name.includes('design')) return 'E4E669'; // 黄色
+              if (name.includes('api') || name.includes('backend')) return '0052CC'; // 深蓝色
+              if (name.includes('frontend') || name.includes('ui')) return 'FBCA04'; // 金色
+              if (name.includes('test') || name.includes('testing')) return '006B75'; // 青色
+              if (name.includes('config') || name.includes('setup')) return '7057FF'; // 靛色
               
-              if (validLabels.length > 0) {
-                await github.rest.issues.setLabels({
+              return 'E6E6FA'; // 默认淡紫色
+            }
+            
+            // 创建新标签
+            const createdLabels = [];
+            for (const newLabel of newLabelsToCreate) {
+              try {
+                const smartColor = getSmartColor(newLabel.name, newLabel.color);
+                core.info(`🔨 创建新标签: ${newLabel.name} (颜色: #${smartColor})`);
+                
+                await github.rest.issues.createLabel({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  issue_number: issueNumber,
-                  labels: validLabels
+                  name: newLabel.name,
+                  description: newLabel.description || `智能分类标签：${newLabel.name}`,
+                  color: smartColor
                 });
-                const explanation = parsedLabels.explanation ? ` - ${parsedLabels.explanation}` : '';
-                core.info(`✅ 成功应用标签到 #${issueNumber}: ${validLabels.join(', ')}${explanation}`);
-              } else {
-                core.warning(`⚠️ Gemini建议的标签都不存在于仓库中，建议添加这些标签: ${parsedLabels.labels_to_set.join(', ')}`);
-                const explanation = parsedLabels.explanation ? ` - ${parsedLabels.explanation}` : '';
-                core.warning(`📝 分析说明: ${parsedLabels.explanation}`);
+                createdLabels.push(newLabel.name);
+                core.info(`✅ 成功创建标签: ${newLabel.name} (${newLabel.description || '智能分类标签'})`);
+              } catch (error) {
+                if (error.status === 422) {
+                  core.info(`📋 标签 "${newLabel.name}" 已存在，将直接使用`);
+                  createdLabels.push(newLabel.name);
+                } else {
+                  core.warning(`❌ 创建标签 "${newLabel.name}" 失败: ${error.message}`);
+                }
               }
+            }
+            
+            // 组合所有要应用的标签
+            const allLabelsToApply = [...validExistingLabels, ...createdLabels];
+            
+            if (allLabelsToApply.length > 0) {
+              await github.rest.issues.setLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: allLabelsToApply
+              });
+              
+              const explanation = parsedLabels.explanation ? ` - ${parsedLabels.explanation}` : '';
+              core.info(`✅ 成功应用 ${allLabelsToApply.length} 个标签到 #${issueNumber}:`);
+              core.info(`   现有标签: ${validExistingLabels.join(', ') || '无'}`);
+              core.info(`   新创建标签: ${createdLabels.join(', ') || '无'}`);
+              core.info(`   说明: ${parsedLabels.explanation || '无额外说明'}`);
             } else {
-              core.info(`🤷 Gemini分析后认为无需为 #${issueNumber} 添加标签`);
+              core.warning(`⚠️ 没有可应用的标签到 #${issueNumber}`);
             }
 
       # 步骤9: (失败时) 发表评论通知用户

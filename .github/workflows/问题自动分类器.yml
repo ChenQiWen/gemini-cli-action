@@ -124,7 +124,8 @@ jobs:
             Repository: ${REPOSITORY}
             Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
             Issue Body: ${ISSUE_BODY}
-            Available Labels: ${AVAILABLE_LABELS}
+            
+            CRITICAL: ONLY use labels from this exact list: ${AVAILABLE_LABELS}
             
             Response format (JSON only):
             {
@@ -132,11 +133,13 @@ jobs:
               "explanation": "Brief explanation"
             }
             
-            Rules:
+            STRICT RULES:
             - ONLY valid JSON response
-            - Use only labels from available list
+            - MUST use labels ONLY from the available list above
+            - DO NOT create new labels
             - Maximum 3 labels
-            - Empty array if no suitable labels
+            - Empty array if no suitable labels from the available list
+            - If available list is empty, return empty array
 
       # 步骤5: 清理CLI目录为重试做准备
       - name: 'Clean CLI for retry (if needed)'
@@ -194,22 +197,28 @@ jobs:
             
             Issue: ${ISSUE_TITLE}
             Body: ${ISSUE_BODY}
-            Labels: ${AVAILABLE_LABELS}
             
-            JSON:
+            MUST ONLY USE LABELS FROM: ${AVAILABLE_LABELS}
+            
+            JSON FORMAT REQUIRED:
             {"labels_to_set":["label"],"explanation":"reason"}
+            
+            RULES: Only use exact labels from list above, no new labels allowed
 
       # 步骤7: 调试输出内容
       - name: 'Debug Output Analysis'
         run: |
           echo "=== 调试Gemini输出 ==="
-          echo "原始分析输出:"
+          echo "📋 可用标签列表:"
+          echo "${{ steps.get_labels.outputs.available_labels }}"
+          echo "--- 分隔线 ---"
+          echo "🤖 原始分析输出:"
           echo "${{ steps.gemini_issue_analysis.outputs.summary }}"
           echo "--- 分隔线 ---"
-          echo "重试分析输出:"
+          echo "🔄 重试分析输出:"
           echo "${{ steps.gemini_retry.outputs.summary }}"
           echo "--- 分隔线 ---"
-          echo "最终使用的输出:"
+          echo "✅ 最终使用的输出:"
           echo "${{ steps.gemini_retry.outputs.summary || steps.gemini_issue_analysis.outputs.summary }}"
           echo "==================="
 
@@ -222,6 +231,7 @@ jobs:
           ISSUE_NUMBER: '${{ inputs.issue_number }}'
           # 优先使用重试结果，如果重试结果为空或无效，则使用原始结果
           LABELS_OUTPUT: '${{ steps.gemini_retry.outputs.summary || steps.gemini_issue_analysis.outputs.summary }}'
+          AVAILABLE_LABELS: '${{ steps.get_labels.outputs.available_labels }}'
         uses: 'actions/github-script@v6'
         with:
           github-token: '${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}'
@@ -261,7 +271,11 @@ jobs:
               
               // 尝试应急处理：如果包含已知标签，手动创建JSON
               const emergencyLabels = [];
-              const availableLabels = ['bug', 'enhancement', 'question', 'documentation', 'duplicate', 'good first issue', 'help wanted'];
+              // 使用实际的可用标签列表
+              const availableLabelsStr = process.env.AVAILABLE_LABELS || '';
+              const availableLabels = availableLabelsStr.split(',').map(l => l.trim()).filter(l => l);
+              
+              core.info(`📋 仓库可用标签: ${availableLabels.join(', ')}`);
               
               for (const label of availableLabels) {
                 if (rawLabels.toLowerCase().includes(label.toLowerCase())) {
@@ -282,22 +296,47 @@ jobs:
             }
 
             const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+            
+            // 获取仓库可用标签列表进行验证
+            const availableLabelsStr = process.env.AVAILABLE_LABELS || '';
+            const availableLabels = availableLabelsStr.split(',').map(l => l.trim()).filter(l => l);
+            core.info(`📋 仓库可用标签: ${availableLabels.join(', ')}`);
 
-            // 如果 JSON 中包含要设置的 labels，则调用 GitHub API 进行设置
+            // 如果 JSON 中包含要设置的 labels，则进行验证并调用 GitHub API
             if (parsedLabels.labels_to_set && parsedLabels.labels_to_set.length > 0) {
-              await github.rest.issues.setLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                labels: parsedLabels.labels_to_set
+              // 过滤出实际存在的标签
+              const validLabels = parsedLabels.labels_to_set.filter(label => {
+                const labelExists = availableLabels.some(availableLabel => 
+                  availableLabel.toLowerCase() === label.toLowerCase()
+                );
+                if (!labelExists) {
+                  core.warning(`⚠️ 标签 "${label}" 在仓库中不存在，将被跳过`);
+                }
+                return labelExists;
               });
-              const explanation = parsedLabels.explanation ? ` - ${parsedLabels.explanation}` : '';
-              core.info(`Successfully set labels for #${issueNumber}: ${parsedLabels.labels_to_set.join(', ')}${explanation}`);
+              
+              core.info(`🔍 Gemini建议的标签: ${parsedLabels.labels_to_set.join(', ')}`);
+              core.info(`✅ 验证后的有效标签: ${validLabels.join(', ')}`);
+              
+              if (validLabels.length > 0) {
+                await github.rest.issues.setLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  labels: validLabels
+                });
+                const explanation = parsedLabels.explanation ? ` - ${parsedLabels.explanation}` : '';
+                core.info(`✅ 成功应用标签到 #${issueNumber}: ${validLabels.join(', ')}${explanation}`);
+              } else {
+                core.warning(`⚠️ Gemini建议的标签都不存在于仓库中，建议添加这些标签: ${parsedLabels.labels_to_set.join(', ')}`);
+                const explanation = parsedLabels.explanation ? ` - ${parsedLabels.explanation}` : '';
+                core.warning(`📝 分析说明: ${parsedLabels.explanation}`);
+              }
             } else {
-              core.info(`No labels to set for #${issueNumber}, leaving as is`);
+              core.info(`🤷 Gemini分析后认为无需为 #${issueNumber} 添加标签`);
             }
 
-      # 步骤6: (失败时) 发表评论通知用户
+      # 步骤9: (失败时) 发表评论通知用户
       - name: 'Post Issue Analysis Failure Comment'
         if: failure() && steps.gemini_issue_analysis.outcome == 'failure'
         env:

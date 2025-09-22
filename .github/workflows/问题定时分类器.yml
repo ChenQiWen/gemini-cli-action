@@ -136,7 +136,7 @@ jobs:
             Process these GitHub issues and return JSON labels:
             
             Repository: ${REPOSITORY}
-            Available Labels: ${AVAILABLE_LABELS}
+            CRITICAL: ONLY use labels from this exact list: ${AVAILABLE_LABELS}
             Issues: ${ISSUES_TO_TRIAGE}
             
             Required JSON array format:
@@ -148,11 +148,14 @@ jobs:
               }
             ]
             
-            Rules:
+            STRICT RULES:
             - ONLY valid JSON array response
-            - Use only labels from available list
+            - MUST use labels ONLY from the available list above
+            - DO NOT create new labels
             - Maximum 3 labels per issue
             - Include all issues
+            - If no suitable labels from available list, use empty array
+            - If available list is empty, return empty arrays for all issues
 
       # 步骤6: 将分析出的 Labels 应用到对应的 Issues
       # 仅当上一步 Gemini 成功运行并返回了非空结果时执行
@@ -161,6 +164,7 @@ jobs:
         env:
           REPOSITORY: '${{ github.repository }}'
           LABELS_OUTPUT: '${{ steps.gemini_issue_analysis.outputs.summary }}'
+          AVAILABLE_LABELS: '${{ steps.get_labels.outputs.available_labels }}'
         uses: 'actions/github-script@v6'
         with:
           github-token: '${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}'
@@ -178,6 +182,11 @@ jobs:
               return;
             }
 
+            // 获取仓库可用标签列表进行验证
+            const availableLabelsStr = process.env.AVAILABLE_LABELS || '';
+            const availableLabels = availableLabelsStr.split(',').map(l => l.trim()).filter(l => l);
+            core.info(`📋 仓库可用标签: ${availableLabels.join(', ')}`);
+
             // 遍历数组中的每一个分类结果
             for (const entry of parsedLabels) {
               const issueNumber = entry.issue_number;
@@ -186,17 +195,35 @@ jobs:
                 continue;
               }
 
-              // 为对应的 Issue 设置 Labels
+              // 为对应的 Issue 设置 Labels (验证标签是否存在)
               if (entry.labels_to_set && entry.labels_to_set.length > 0) {
-                await github.rest.issues.setLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issueNumber,
-                  labels: entry.labels_to_set
+                // 过滤出实际存在的标签
+                const validLabels = entry.labels_to_set.filter(label => {
+                  const labelExists = availableLabels.some(availableLabel => 
+                    availableLabel.toLowerCase() === label.toLowerCase()
+                  );
+                  if (!labelExists) {
+                    core.warning(`⚠️ 标签 "${label}" 在仓库中不存在，将被跳过 (Issue #${issueNumber})`);
+                  }
+                  return labelExists;
                 });
-                const explanation = entry.explanation ? ` - ${entry.explanation}` : '';
-                core.info(`Successfully set labels for #${issueNumber}: ${entry.labels_to_set.join(', ')}${explanation}`);
+                
+                core.info(`🔍 #${issueNumber} Gemini建议的标签: ${entry.labels_to_set.join(', ')}`);
+                core.info(`✅ #${issueNumber} 验证后的有效标签: ${validLabels.join(', ')}`);
+                
+                if (validLabels.length > 0) {
+                  await github.rest.issues.setLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    labels: validLabels
+                  });
+                  const explanation = entry.explanation ? ` - ${entry.explanation}` : '';
+                  core.info(`✅ 成功应用标签到 #${issueNumber}: ${validLabels.join(', ')}${explanation}`);
+                } else {
+                  core.warning(`⚠️ #${issueNumber} Gemini建议的标签都不存在于仓库中: ${entry.labels_to_set.join(', ')}`);
+                }
               } else {
-                core.info(`No labels to set for #${issueNumber}, leaving as is`);
+                core.info(`🤷 #${issueNumber} Gemini分析后认为无需添加标签`);
               }
             }

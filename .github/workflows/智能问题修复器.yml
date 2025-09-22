@@ -127,57 +127,58 @@ jobs:
               "candidateCount": 1,
               "maxOutputTokens": 6000,
               "responseMimeType": "application/json",
-              "systemInstruction": "You are an expert code fixer that provides structured JSON responses with specific file modifications."
+              "systemInstruction": "你是一个专业的代码修复专家，提供结构化的JSON响应，包含具体的文件修改方案。请使用中文进行所有分析和说明。"
             }
           prompt: |-
-            IMPORTANT: Respond ONLY with valid JSON. No markdown, no conversational text.
+            重要提示：请只用有效的JSON格式回复，不要使用markdown或对话文本。请使用中文进行所有分析和说明。
             
-            You are an expert code fixer. Analyze the issue and provide actionable file modifications.
+            你是一个专业的代码修复专家。请分析问题并提供可执行的文件修改方案。
             
-            ## Issue Information
+            ## 问题信息
             - Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
-            - Fix Type: ${FIX_TYPE}
-            - Description: ${ISSUE_BODY}
+            - 修复类型: ${FIX_TYPE}
+            - 问题描述: ${ISSUE_BODY}
             
-            ## Project Structure
+            ## 项目结构
             ${PROJECT_OVERVIEW}
             
-            ## Required JSON Response Format
+            ## 必需的JSON响应格式
             {
               "analysis": {
-                "root_cause": "Detailed root cause analysis",
+                "root_cause": "详细的根本原因分析",
                 "severity": "low|medium|high|critical",
-                "impact_scope": "Description of affected modules/features",
-                "fix_strategy": "Overall fix strategy description"
+                "impact_scope": "受影响的模块/功能描述",
+                "fix_strategy": "整体修复策略描述"
               },
               "file_modifications": [
                 {
-                  "file_path": "relative/path/to/file.ext",
+                  "file_path": "相对路径/文件名.扩展名",
                   "action": "create|modify|delete",
-                  "description": "What this change does",
-                  "content": "Complete new file content (for create/modify)",
-                  "old_content": "Content to replace (for modify only)",
-                  "new_content": "Replacement content (for modify only)"
+                  "description": "此更改的作用说明",
+                  "content": "完整的新文件内容(用于create/modify)",
+                  "old_content": "要替换的内容(仅用于modify)",
+                  "new_content": "替换后的内容(仅用于modify)"
                 }
               ],
               "test_suggestions": [
-                "Specific test case suggestion 1",
-                "Specific test case suggestion 2"
+                "具体的测试用例建议1",
+                "具体的测试用例建议2"
               ],
-              "commit_message": "Clear, conventional commit message",
-              "pr_description": "Detailed PR description explaining the fix",
-              "additional_notes": "Important implementation notes or warnings"
+              "commit_message": "清晰的常规提交信息",
+              "pr_description": "详细的PR描述，解释修复内容",
+              "additional_notes": "重要的实施注意事项或警告"
             }
             
-            ## Rules
-            1. Provide COMPLETE file content for modifications
-            2. Use precise file paths relative to project root
-            3. Ensure all code follows project conventions
-            4. Include error handling and edge cases
-            5. Suggest meaningful test cases
-            6. Keep changes minimal but complete
+            ## 规则要求
+            1. 为修改提供完整的文件内容
+            2. 使用相对于项目根目录的精确文件路径
+            3. 确保所有代码遵循项目约定
+            4. 包含错误处理和边缘情况
+            5. 建议有意义的测试用例
+            6. 保持更改最小但完整
+            7. 所有分析和描述必须使用中文
             
-            OUTPUT ONLY JSON - NO OTHER TEXT ALLOWED
+            只输出JSON格式 - 不允许其他文本
 
       # 步骤6: 确保从main分支创建修复分支
       - name: 🌿 从main分支创建修复分支

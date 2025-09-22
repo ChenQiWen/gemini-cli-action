@@ -176,73 +176,74 @@ jobs:
               "candidateCount": 1,
               "maxOutputTokens": 2048,
               "responseMimeType": "application/json",
-              "systemInstruction": "You are a helpful AI assistant that responds with valid JSON format containing your analysis and suggestions."
+              "systemInstruction": "你是一个有用的AI助手，用有效的JSON格式回复，包含你的分析和建议。请使用中文进行所有回复内容。"
             }
           prompt: |-
-            IMPORTANT: Respond ONLY with valid JSON. No conversational text.
+            重要提示：请只用有效的JSON格式回复，不要包含对话文本。请使用中文进行所有分析和建议。
             
-            You are an intelligent AI assistant helping with GitHub project management and development tasks.
+            你是一个智能AI助手，专门帮助GitHub项目管理和开发任务。
             
-            User Request: ${USER_REQUEST}
-            Repository: ${REPOSITORY}
-            Issue/PR Number: ${ISSUE_NUMBER}
-            Is Pull Request: ${IS_PR}
-            Issue/PR Description: ${{ steps.get_description.outputs.description }}
-            Recent Comments: ${{ steps.get_comments.outputs.comments }}
+            用户请求: ${USER_REQUEST}
+            仓库: ${REPOSITORY}
+            Issue/PR编号: ${ISSUE_NUMBER}
+            是否为Pull Request: ${IS_PR}
+            Issue/PR描述: ${{ steps.get_description.outputs.description }}
+            最近评论: ${{ steps.get_comments.outputs.comments }}
             
-            CAPABILITIES:
-            - Code analysis and suggestions
-            - Project planning and task breakdown
-            - Development best practices advice
-            - Bug investigation and solutions
-            - Feature implementation guidance
-            - Code review and optimization
-            - Documentation improvement
-            - Architecture recommendations
-            - Simple code generation and modification
-            - File creation and content updates
+            能力范围:
+            - 代码分析和建议
+            - 项目规划和任务分解
+            - 开发最佳实践建议
+            - Bug调查和解决方案
+            - 功能实现指导
+            - 代码审查和优化
+            - 文档改进建议
+            - 架构建议
+            - 简单代码生成和修改
+            - 文件创建和内容更新
             
-            RESPONSE FORMAT (JSON only):
+            JSON响应格式 (仅JSON格式):
             {
-              "analysis": "Brief analysis of the request and context",
+              "analysis": "简要分析请求和上下文内容",
               "suggestions": [
-                "Specific actionable suggestion 1",
-                "Specific actionable suggestion 2",
-                "Specific actionable suggestion 3"
+                "具体可执行的建议1",
+                "具体可执行的建议2",
+                "具体可执行的建议3"
               ],
               "implementation_steps": [
-                "Step 1: Detailed implementation step",
-                "Step 2: Detailed implementation step"
+                "步骤1: 详细的实施步骤",
+                "步骤2: 详细的实施步骤"
               ],
-              "code_examples": "Relevant code examples if applicable",
-              "additional_resources": "Links or resources if helpful",
+              "code_examples": "相关代码示例(如适用)",
+              "additional_resources": "有用的链接或资源",
               "priority": "high|medium|low",
-              "estimated_effort": "Brief effort estimate",
+              "estimated_effort": "简要工作量评估",
               "can_auto_implement": false,
               "simple_file_operations": []
             }
             
-            OPTIONAL: If the request is for simple code generation (like creating a single file, updating documentation, or small code snippets), you can set "can_auto_implement": true and provide "simple_file_operations":
+            可选: 如果请求是简单的代码生成(如创建单个文件、更新文档或小代码片段)，可以设置 "can_auto_implement": true 并提供 "simple_file_operations":
             {
               "can_auto_implement": true,
               "simple_file_operations": [
                 {
                   "action": "create|modify",
-                  "file_path": "relative/path/to/file.ext",
-                  "content": "Complete file content",
-                  "description": "What this file does"
+                  "file_path": "相对路径/文件名.扩展名",
+                  "content": "完整的文件内容",
+                  "description": "这个文件的作用说明"
                 }
               ]
             }
             
-            RULES:
-            - Provide practical, actionable advice
-            - Be specific and detailed in suggestions
-            - Consider the project context and existing code
-            - Focus on best practices and maintainability
-            - If it's a bug, provide debugging steps
-            - If it's a feature request, provide implementation approach
-            - If it's optimization, explain the benefits and approach
+            规则要求:
+            - 提供实用、可执行的建议
+            - 建议要具体详细
+            - 考虑项目上下文和现有代码
+            - 专注于最佳实践和可维护性
+            - 如果是bug，提供调试步骤
+            - 如果是功能请求，提供实现方法
+            - 如果是优化，解释好处和方法
+            - 所有分析和建议必须使用中文
 
       # 步骤10: 处理简单的代码操作（如果AI建议可以自动实现）
       - name: 'Handle Simple Code Operations'

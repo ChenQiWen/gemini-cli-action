@@ -346,6 +346,82 @@ jobs:
               core.info(`🎯 代码操作完成: ${operationsPerformed.length}个操作成功, ${operationsFailed.length}个操作失败`);
             }
 
+      # 步骤10.5: 提交简单代码操作到仓库（如果有文件操作）
+      - name: 'Commit Simple Code Operations'
+        id: 'commit_simple_ops'
+        if: steps.handle_code_ops.outputs.code_operations_performed == 'true'
+        env:
+          GITHUB_TOKEN: '${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}'
+          ISSUE_NUMBER: '${{ steps.get_context.outputs.issue_number }}'
+          USER_REQUEST: '${{ steps.get_context.outputs.user_request }}'
+          OPERATIONS_SUMMARY: '${{ steps.handle_code_ops.outputs.operations_summary }}'
+        run: |
+          # 配置Git用户
+          git config --global user.name 'ai-assistant[bot]'
+          git config --global user.email 'ai-assistant[bot]@users.noreply.github.com'
+          
+          # 检查是否有变更
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "⚠️ 没有发现代码变更，跳过提交"
+            exit 0
+          fi
+          
+          # 创建简单操作分支
+          BRANCH_NAME="feature/ai-simple-ops-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH_NAME"
+          
+          # 添加所有变更
+          git add .
+          
+          # 显示变更概览
+          echo "📊 变更概览:"
+          git diff --cached --stat
+          
+          # 提交变更
+          COMMIT_MSG="feat: AI助手自动生成代码文件
+
+          用户请求: ${USER_REQUEST}
+          
+          自动执行的操作:
+          ${OPERATIONS_SUMMARY}
+          
+          由AI智能助手自动生成 (#${ISSUE_NUMBER})"
+          
+          git commit -m "$COMMIT_MSG"
+          
+          # 推送到远程分支
+          git push origin "$BRANCH_NAME"
+          
+          # 创建PR
+          PR_URL=$(gh pr create \
+            --title "🤖 AI助手自动生成: ${USER_REQUEST}" \
+            --body "## 🤖 AI助手自动代码生成
+
+          **用户请求**: ${USER_REQUEST}
+          **Issue链接**: #${ISSUE_NUMBER}
+          
+          ### 📁 自动生成的文件
+          
+          ${OPERATIONS_SUMMARY}
+          
+          ### 🤖 AI助手说明
+          
+          - ✅ 此PR由AI智能助手自动生成
+          - 📝 根据用户请求自动创建代码文件
+          - 👀 **请仔细审查所有代码更改**
+          - 🧪 建议测试生成的代码
+          - ✋ 如有疑问请在PR中评论讨论
+          
+          ---
+          *🤖 由AI智能助手自动创建 | 请仔细审查后合并*" \
+            --head "$BRANCH_NAME" \
+            --base main \
+            --label "ai-generated,simple-ops,needs-review")
+          
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "✅ 代码已提交并创建PR: $PR_URL"
+
       # 步骤11: 处理Gemini输出并回复用户
       - name: 'Process AI Response and Reply'
         env:
@@ -357,6 +433,8 @@ jobs:
           CODE_OPS_PERFORMED: '${{ steps.handle_code_ops.outputs.code_operations_performed }}'
           OPERATIONS_SUMMARY: '${{ steps.handle_code_ops.outputs.operations_summary }}'
           OPERATIONS_FAILED: '${{ steps.handle_code_ops.outputs.operations_failed }}'
+          PR_URL: '${{ steps.commit_simple_ops.outputs.pr_url }}'
+          BRANCH_NAME: '${{ steps.commit_simple_ops.outputs.branch_name }}'
         uses: 'actions/github-script@v6'
         with:
           github-token: '${{ env.GITHUB_TOKEN }}'
@@ -415,6 +493,8 @@ jobs:
             const codeOpsPerformed = process.env.CODE_OPS_PERFORMED === 'true';
             const operationsSummary = process.env.OPERATIONS_SUMMARY || '';
             const operationsFailed = process.env.OPERATIONS_FAILED || '';
+            const prUrl = process.env.PR_URL || '';
+            const branchName = process.env.BRANCH_NAME || '';
             
             // 构建回复消息
             let replyMessage = `## 🤖 AI助手分析结果\n\n`;
@@ -480,10 +560,25 @@ jobs:
               replyMessage += `**预估工作量**: ${analysis.estimated_effort}\n`;
             }
             
-            replyMessage += `\n---\n`;
+              replyMessage += `\n`;
             
-            if (codeOpsPerformed) {
-              replyMessage += `*🤖 AI智能助手已自动执行代码操作并生成分析 | 如需进一步帮助，请使用 @abc 命令*`;
+            // 如果创建了PR，显示PR信息
+            if (prUrl) {
+              replyMessage += `## 🔄 Pull Request 已创建\n\n`;
+              replyMessage += `**PR链接**: ${prUrl}\n`;
+              replyMessage += `**分支名称**: \`${branchName}\`\n\n`;
+              replyMessage += `### 👀 下一步操作\n\n`;
+              replyMessage += `1. **🔍 审查PR**: 点击上方链接查看生成的代码\n`;
+              replyMessage += `2. **🧪 测试代码**: 确保生成的代码符合预期\n`;
+              replyMessage += `3. **✅ 合并代码**: 审查通过后合并PR\n\n`;
+            }
+            
+            replyMessage += `---\n`;
+            
+            if (codeOpsPerformed && prUrl) {
+              replyMessage += `*🤖 AI智能助手已自动执行代码操作并创建PR | 请审查后合并 | 如需进一步帮助，请使用 @abc 命令*`;
+            } else if (codeOpsPerformed) {
+              replyMessage += `*🤖 AI智能助手已自动执行代码操作 | 如需进一步帮助，请使用 @abc 命令*`;
             } else {
               replyMessage += `*由AI智能助手自动生成 | 如需代码自动生成，请明确说明要创建的文件 | 使用 @abc 获取更多帮助*`;
             }

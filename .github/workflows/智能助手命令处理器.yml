@@ -150,7 +150,7 @@ jobs:
       # 步骤9: 运行 Gemini CLI 核心逻辑
       - name: 'Run Gemini'
         id: 'run_gemini'
-        uses: 'google-github-actions/run-gemini-cli@v0'
+        uses: 'google-github-actions/run-gemini-cli@v0.1.12'
         env:
           # 将前面所有步骤收集到的上下文信息传递给 Gemini
           GITHUB_TOKEN: '${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}'
@@ -172,9 +172,175 @@ jobs:
           settings: |-
             {
               "debug": false,
-              "maxSessionTurns": 50
+              "temperature": 0.3,
+              "candidateCount": 1,
+              "maxOutputTokens": 2048,
+              "responseMimeType": "application/json",
+              "systemInstruction": "You are a helpful AI assistant that responds with valid JSON format containing your analysis and suggestions."
             }
-          # ... 此处省略了长篇的 prompt ...
           prompt: |-
-            ## Role
-            You are a helpful AI assistant...
+            IMPORTANT: Respond ONLY with valid JSON. No conversational text.
+            
+            You are an intelligent AI assistant helping with GitHub project management and development tasks.
+            
+            User Request: ${USER_REQUEST}
+            Repository: ${REPOSITORY}
+            Issue/PR Number: ${ISSUE_NUMBER}
+            Is Pull Request: ${IS_PR}
+            Issue/PR Description: ${{ steps.get_description.outputs.description }}
+            Recent Comments: ${{ steps.get_comments.outputs.comments }}
+            
+            CAPABILITIES:
+            - Code analysis and suggestions
+            - Project planning and task breakdown
+            - Development best practices advice
+            - Bug investigation and solutions
+            - Feature implementation guidance
+            - Code review and optimization
+            - Documentation improvement
+            - Architecture recommendations
+            
+            RESPONSE FORMAT (JSON only):
+            {
+              "analysis": "Brief analysis of the request and context",
+              "suggestions": [
+                "Specific actionable suggestion 1",
+                "Specific actionable suggestion 2",
+                "Specific actionable suggestion 3"
+              ],
+              "implementation_steps": [
+                "Step 1: Detailed implementation step",
+                "Step 2: Detailed implementation step"
+              ],
+              "code_examples": "Relevant code examples if applicable",
+              "additional_resources": "Links or resources if helpful",
+              "priority": "high|medium|low",
+              "estimated_effort": "Brief effort estimate"
+            }
+            
+            RULES:
+            - Provide practical, actionable advice
+            - Be specific and detailed in suggestions
+            - Consider the project context and existing code
+            - Focus on best practices and maintainability
+            - If it's a bug, provide debugging steps
+            - If it's a feature request, provide implementation approach
+            - If it's optimization, explain the benefits and approach
+
+      # 步骤10: 处理Gemini输出并回复用户
+      - name: 'Process AI Response and Reply'
+        env:
+          GITHUB_TOKEN: '${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}'
+          ISSUE_NUMBER: '${{ steps.get_context.outputs.issue_number }}'
+          REPOSITORY: '${{ github.repository }}'
+          GEMINI_OUTPUT: '${{ steps.run_gemini.outputs.summary }}'
+          USER_REQUEST: '${{ steps.get_context.outputs.user_request }}'
+        uses: 'actions/github-script@v6'
+        with:
+          github-token: '${{ env.GITHUB_TOKEN }}'
+          script: |-
+            const geminiOutput = process.env.GEMINI_OUTPUT;
+            const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+            const userRequest = process.env.USER_REQUEST;
+            
+            core.info(`Raw Gemini output: ${geminiOutput}`);
+            
+            let analysis;
+            try {
+              analysis = JSON.parse(geminiOutput);
+              core.info(`Parsed AI analysis: ${JSON.stringify(analysis)}`);
+            } catch (error) {
+              core.warning(`Failed to parse JSON: ${error.message}`);
+              // 如果JSON解析失败，使用原始输出
+              analysis = {
+                analysis: "AI分析完成",
+                suggestions: [geminiOutput || "抱歉，分析过程中出现了问题，请稍后重试。"],
+                implementation_steps: [],
+                priority: "medium"
+              };
+            }
+            
+            // 构建回复消息
+            let replyMessage = `## 🤖 AI助手分析结果\n\n`;
+            replyMessage += `**用户请求**: ${userRequest}\n\n`;
+            
+            if (analysis.analysis) {
+              replyMessage += `### 📋 分析\n${analysis.analysis}\n\n`;
+            }
+            
+            if (analysis.suggestions && analysis.suggestions.length > 0) {
+              replyMessage += `### 💡 建议\n`;
+              analysis.suggestions.forEach((suggestion, index) => {
+                replyMessage += `${index + 1}. ${suggestion}\n`;
+              });
+              replyMessage += '\n';
+            }
+            
+            if (analysis.implementation_steps && analysis.implementation_steps.length > 0) {
+              replyMessage += `### 🔧 实施步骤\n`;
+              analysis.implementation_steps.forEach((step, index) => {
+                replyMessage += `${index + 1}. ${step}\n`;
+              });
+              replyMessage += '\n';
+            }
+            
+            if (analysis.code_examples) {
+              replyMessage += `### 💻 代码示例\n\`\`\`\n${analysis.code_examples}\n\`\`\`\n\n`;
+            }
+            
+            if (analysis.additional_resources) {
+              replyMessage += `### 📚 相关资源\n${analysis.additional_resources}\n\n`;
+            }
+            
+            if (analysis.priority) {
+              const priorityEmoji = analysis.priority === 'high' ? '🔴' : 
+                                   analysis.priority === 'medium' ? '🟡' : '🟢';
+              replyMessage += `**优先级**: ${priorityEmoji} ${analysis.priority}\n`;
+            }
+            
+            if (analysis.estimated_effort) {
+              replyMessage += `**预估工作量**: ${analysis.estimated_effort}\n`;
+            }
+            
+            replyMessage += `\n---\n*由AI智能助手自动生成 | 如需进一步帮助，请使用 @abc 命令*`;
+            
+            // 发表评论
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: replyMessage
+            });
+            
+            core.info(`✅ 已成功回复用户请求 #${issueNumber}`);
+
+      # 步骤11: 错误处理 - 如果AI分析失败，通知用户
+      - name: 'Handle AI Analysis Failure'
+        if: failure() && steps.run_gemini.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: '${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}'
+          ISSUE_NUMBER: '${{ steps.get_context.outputs.issue_number }}'
+          REPOSITORY: '${{ github.repository }}'
+          USER_REQUEST: '${{ steps.get_context.outputs.user_request }}'
+        run: |-
+          set -euo pipefail
+          ERROR_MESSAGE="## ⚠️ AI助手处理失败
+          
+          **用户请求**: ${USER_REQUEST}
+          
+          很抱歉，AI助手在处理您的请求时遇到了问题。可能的原因：
+          - 网络连接问题
+          - API配置问题  
+          - 请求内容过于复杂
+          
+          ### 建议
+          1. 请稍后重试
+          2. 尝试简化您的请求
+          3. 检查是否有语法错误或不清楚的描述
+          
+          如果问题持续存在，请联系管理员检查AI助手配置。
+          
+          ---
+          *AI智能助手错误处理 | 请使用 @abc 命令重试*"
+          
+          gh issue comment "${ISSUE_NUMBER}" --body "${ERROR_MESSAGE}" --repo "${REPOSITORY}"

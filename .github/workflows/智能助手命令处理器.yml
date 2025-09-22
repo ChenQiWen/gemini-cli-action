@@ -246,17 +246,46 @@ jobs:
             core.info(`Raw Gemini output: ${geminiOutput}`);
             
             let analysis;
+            let cleanedOutput = geminiOutput;
+            
+            // 多层清理逻辑
+            if (cleanedOutput) {
+              // 移除markdown代码块
+              cleanedOutput = cleanedOutput.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+              // 移除前后空白
+              cleanedOutput = cleanedOutput.trim();
+              // 移除可能的对话前缀
+              cleanedOutput = cleanedOutput.replace(/^Here's the analysis.*?:\s*/i, '');
+              cleanedOutput = cleanedOutput.replace(/^Based on.*?:\s*/i, '');
+              
+              // 如果不是以{开头，尝试用正则提取JSON
+              if (!cleanedOutput.startsWith('{')) {
+                const jsonMatch = cleanedOutput.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  cleanedOutput = jsonMatch[0];
+                }
+              }
+            }
+            
             try {
-              analysis = JSON.parse(geminiOutput);
-              core.info(`Parsed AI analysis: ${JSON.stringify(analysis)}`);
+              analysis = JSON.parse(cleanedOutput);
+              core.info(`✅ 成功解析AI分析: ${JSON.stringify(analysis)}`);
             } catch (error) {
-              core.warning(`Failed to parse JSON: ${error.message}`);
-              // 如果JSON解析失败，使用原始输出
+              core.warning(`❌ JSON解析失败: ${error.message}`);
+              core.info(`原始输出: ${geminiOutput}`);
+              core.info(`清理后输出: ${cleanedOutput}`);
+              
+              // 智能fallback：提供用户友好的错误处理
               analysis = {
-                analysis: "AI分析完成",
-                suggestions: [geminiOutput || "抱歉，分析过程中出现了问题，请稍后重试。"],
+                analysis: "AI助手分析过程中遇到了格式问题，但仍尽力为您提供帮助。",
+                suggestions: [
+                  "请稍后重试您的请求",
+                  "尝试重新表述您的问题，使其更加具体",
+                  "如果问题持续，请联系管理员检查AI助手配置"
+                ],
                 implementation_steps: [],
-                priority: "medium"
+                priority: "medium",
+                estimated_effort: "请重新提交请求获取准确评估"
               };
             }
             

@@ -199,6 +199,8 @@ jobs:
             - Code review and optimization
             - Documentation improvement
             - Architecture recommendations
+            - Simple code generation and modification
+            - File creation and content updates
             
             RESPONSE FORMAT (JSON only):
             {
@@ -215,7 +217,22 @@ jobs:
               "code_examples": "Relevant code examples if applicable",
               "additional_resources": "Links or resources if helpful",
               "priority": "high|medium|low",
-              "estimated_effort": "Brief effort estimate"
+              "estimated_effort": "Brief effort estimate",
+              "can_auto_implement": false,
+              "simple_file_operations": []
+            }
+            
+            OPTIONAL: If the request is for simple code generation (like creating a single file, updating documentation, or small code snippets), you can set "can_auto_implement": true and provide "simple_file_operations":
+            {
+              "can_auto_implement": true,
+              "simple_file_operations": [
+                {
+                  "action": "create|modify",
+                  "file_path": "relative/path/to/file.ext",
+                  "content": "Complete file content",
+                  "description": "What this file does"
+                }
+              ]
             }
             
             RULES:
@@ -227,7 +244,108 @@ jobs:
             - If it's a feature request, provide implementation approach
             - If it's optimization, explain the benefits and approach
 
-      # 步骤10: 处理Gemini输出并回复用户
+      # 步骤10: 处理简单的代码操作（如果AI建议可以自动实现）
+      - name: 'Handle Simple Code Operations'
+        id: 'handle_code_ops'
+        env:
+          GITHUB_TOKEN: '${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}'
+          GEMINI_OUTPUT: '${{ steps.run_gemini.outputs.summary }}'
+          ISSUE_NUMBER: '${{ steps.get_context.outputs.issue_number }}'
+          REPOSITORY: '${{ github.repository }}'
+        uses: 'actions/github-script@v6'
+        with:
+          github-token: '${{ env.GITHUB_TOKEN }}'
+          script: |-
+            const fs = require('fs');
+            const path = require('path');
+            
+            const geminiOutput = process.env.GEMINI_OUTPUT;
+            const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+            
+            let analysis;
+            let cleanedOutput = geminiOutput;
+            
+            // 清理JSON输出
+            if (cleanedOutput) {
+              cleanedOutput = cleanedOutput.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+              cleanedOutput = cleanedOutput.trim();
+              if (!cleanedOutput.startsWith('{')) {
+                const jsonMatch = cleanedOutput.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  cleanedOutput = jsonMatch[0];
+                }
+              }
+            }
+            
+            try {
+              analysis = JSON.parse(cleanedOutput);
+            } catch (error) {
+              core.info('❌ JSON解析失败，跳过代码操作');
+              core.setOutput('code_operations_performed', false);
+              return;
+            }
+            
+            // 检查是否可以自动实现
+            if (!analysis.can_auto_implement || !analysis.simple_file_operations || analysis.simple_file_operations.length === 0) {
+              core.info('ℹ️ 无需执行代码操作');
+              core.setOutput('code_operations_performed', false);
+              return;
+            }
+            
+            core.info('🤖 开始执行简单代码操作...');
+            
+            let operationsPerformed = [];
+            let operationsFailed = [];
+            
+            // 执行文件操作
+            for (const operation of analysis.simple_file_operations) {
+              try {
+                const filePath = operation.file_path;
+                
+                if (operation.action === 'create') {
+                  // 创建新文件
+                  const dirPath = path.dirname(filePath);
+                  if (dirPath !== '.' && !fs.existsSync(dirPath)) {
+                    fs.mkdirSync(dirPath, { recursive: true });
+                  }
+                  fs.writeFileSync(filePath, operation.content || '');
+                  operationsPerformed.push(`✨ 创建文件: ${filePath} - ${operation.description}`);
+                  core.info(`✅ 创建文件: ${filePath}`);
+                  
+                } else if (operation.action === 'modify') {
+                  // 修改现有文件
+                  if (fs.existsSync(filePath)) {
+                    fs.writeFileSync(filePath, operation.content || '');
+                    operationsPerformed.push(`📝 修改文件: ${filePath} - ${operation.description}`);
+                    core.info(`✅ 修改文件: ${filePath}`);
+                  } else {
+                    // 文件不存在，创建新文件
+                    const dirPath = path.dirname(filePath);
+                    if (dirPath !== '.' && !fs.existsSync(dirPath)) {
+                      fs.mkdirSync(dirPath, { recursive: true });
+                    }
+                    fs.writeFileSync(filePath, operation.content || '');
+                    operationsPerformed.push(`✨ 创建文件: ${filePath} - ${operation.description}`);
+                    core.info(`✅ 创建文件(原为修改): ${filePath}`);
+                  }
+                }
+              } catch (error) {
+                const errorMsg = `❌ 操作文件 ${operation.file_path} 失败: ${error.message}`;
+                operationsFailed.push(errorMsg);
+                core.error(errorMsg);
+              }
+            }
+            
+            // 设置输出
+            core.setOutput('code_operations_performed', operationsPerformed.length > 0);
+            core.setOutput('operations_summary', operationsPerformed.join('\n'));
+            core.setOutput('operations_failed', operationsFailed.join('\n'));
+            
+            if (operationsPerformed.length > 0) {
+              core.info(`🎯 代码操作完成: ${operationsPerformed.length}个操作成功, ${operationsFailed.length}个操作失败`);
+            }
+
+      # 步骤11: 处理Gemini输出并回复用户
       - name: 'Process AI Response and Reply'
         env:
           GITHUB_TOKEN: '${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}'
@@ -235,6 +353,9 @@ jobs:
           REPOSITORY: '${{ github.repository }}'
           GEMINI_OUTPUT: '${{ steps.run_gemini.outputs.summary }}'
           USER_REQUEST: '${{ steps.get_context.outputs.user_request }}'
+          CODE_OPS_PERFORMED: '${{ steps.handle_code_ops.outputs.code_operations_performed }}'
+          OPERATIONS_SUMMARY: '${{ steps.handle_code_ops.outputs.operations_summary }}'
+          OPERATIONS_FAILED: '${{ steps.handle_code_ops.outputs.operations_failed }}'
         uses: 'actions/github-script@v6'
         with:
           github-token: '${{ env.GITHUB_TOKEN }}'
@@ -289,9 +410,36 @@ jobs:
               };
             }
             
+            // 检查是否执行了代码操作
+            const codeOpsPerformed = process.env.CODE_OPS_PERFORMED === 'true';
+            const operationsSummary = process.env.OPERATIONS_SUMMARY || '';
+            const operationsFailed = process.env.OPERATIONS_FAILED || '';
+            
             // 构建回复消息
             let replyMessage = `## 🤖 AI助手分析结果\n\n`;
             replyMessage += `**用户请求**: ${userRequest}\n\n`;
+            
+            // 如果执行了代码操作，先显示操作结果
+            if (codeOpsPerformed) {
+              replyMessage += `## ✅ 代码操作已完成\n\n`;
+              replyMessage += `我已经根据分析自动执行了以下操作：\n\n`;
+              if (operationsSummary) {
+                operationsSummary.split('\n').forEach(op => {
+                  if (op.trim()) {
+                    replyMessage += `${op}\n`;
+                  }
+                });
+              }
+              if (operationsFailed) {
+                replyMessage += `\n⚠️ **部分操作失败**:\n`;
+                operationsFailed.split('\n').forEach(op => {
+                  if (op.trim()) {
+                    replyMessage += `${op}\n`;
+                  }
+                });
+              }
+              replyMessage += `\n---\n\n`;
+            }
             
             if (analysis.analysis) {
               replyMessage += `### 📋 分析\n${analysis.analysis}\n\n`;
@@ -331,7 +479,13 @@ jobs:
               replyMessage += `**预估工作量**: ${analysis.estimated_effort}\n`;
             }
             
-            replyMessage += `\n---\n*由AI智能助手自动生成 | 如需进一步帮助，请使用 @abc 命令*`;
+            replyMessage += `\n---\n`;
+            
+            if (codeOpsPerformed) {
+              replyMessage += `*🤖 AI智能助手已自动执行代码操作并生成分析 | 如需进一步帮助，请使用 @abc 命令*`;
+            } else {
+              replyMessage += `*由AI智能助手自动生成 | 如需代码自动生成，请明确说明要创建的文件 | 使用 @abc 获取更多帮助*`;
+            }
             
             // 发表评论
             await github.rest.issues.createComment({
@@ -343,7 +497,7 @@ jobs:
             
             core.info(`✅ 已成功回复用户请求 #${issueNumber}`);
 
-      # 步骤11: 错误处理 - 如果AI分析失败，通知用户
+      # 步骤12: 错误处理 - 如果AI分析失败，通知用户
       - name: 'Handle AI Analysis Failure'
         if: failure() && steps.run_gemini.outcome == 'failure'
         env:

@@ -103,7 +103,7 @@ jobs:
       # 步骤5: AI分析和修复方案生成
       - name: 🤖 AI问题分析与修复方案生成
         id: ai_fix_analysis
-        uses: google-github-actions/run-gemini-cli@v0
+        uses: google-github-actions/run-gemini-cli@v0.1.12
         env:
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
           ISSUE_TITLE: ${{ inputs.issue_title }}
@@ -112,7 +112,6 @@ jobs:
           FIX_TYPE: ${{ inputs.fix_type }}
           PROJECT_OVERVIEW: ${{ steps.analyze_codebase.outputs.project_overview }}
         with:
-          gemini_cli_version: 'v0.1.12'
           gemini_api_key: '${{ secrets.GEMINI_API_KEY }}'
           gemini_debug: false  # 关闭调试模式
           gcp_workload_identity_provider: '${{ vars.GCP_WIF_PROVIDER }}'
@@ -126,162 +125,534 @@ jobs:
               "maxSessionTurns": 1,
               "temperature": 0.2,
               "candidateCount": 1,
-              "maxOutputTokens": 4000
+              "maxOutputTokens": 6000,
+              "responseMimeType": "application/json",
+              "systemInstruction": "You are an expert code fixer that provides structured JSON responses with specific file modifications."
             }
           prompt: |-
-            ## 角色
-            你是一个专业的代码修复专家，擅长分析问题并生成精确的修复方案。
+            IMPORTANT: Respond ONLY with valid JSON. No markdown, no conversational text.
             
-            ## 任务
-            分析以下Issue并生成详细的修复方案，包括具体的代码更改建议。
+            You are an expert code fixer. Analyze the issue and provide actionable file modifications.
             
-            ## Issue信息
-            - **Issue #${ISSUE_NUMBER}**: ${ISSUE_TITLE}
-            - **修复类型**: ${FIX_TYPE}
-            - **问题描述**: 
-            ${ISSUE_BODY}
+            ## Issue Information
+            - Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+            - Fix Type: ${FIX_TYPE}
+            - Description: ${ISSUE_BODY}
             
-            ## 项目信息
+            ## Project Structure
             ${PROJECT_OVERVIEW}
             
-            ## 分析要求
-            请按以下步骤进行分析：
+            ## Required JSON Response Format
+            {
+              "analysis": {
+                "root_cause": "Detailed root cause analysis",
+                "severity": "low|medium|high|critical",
+                "impact_scope": "Description of affected modules/features",
+                "fix_strategy": "Overall fix strategy description"
+              },
+              "file_modifications": [
+                {
+                  "file_path": "relative/path/to/file.ext",
+                  "action": "create|modify|delete",
+                  "description": "What this change does",
+                  "content": "Complete new file content (for create/modify)",
+                  "old_content": "Content to replace (for modify only)",
+                  "new_content": "Replacement content (for modify only)"
+                }
+              ],
+              "test_suggestions": [
+                "Specific test case suggestion 1",
+                "Specific test case suggestion 2"
+              ],
+              "commit_message": "Clear, conventional commit message",
+              "pr_description": "Detailed PR description explaining the fix",
+              "additional_notes": "Important implementation notes or warnings"
+            }
             
-            1. **问题诊断**: 分析问题的根本原因
-            2. **影响评估**: 评估问题的影响范围和严重程度
-            3. **修复策略**: 制定修复策略和实施步骤
-            4. **代码建议**: 提供具体的代码修改建议
-            5. **测试建议**: 建议相应的测试用例
+            ## Rules
+            1. Provide COMPLETE file content for modifications
+            2. Use precise file paths relative to project root
+            3. Ensure all code follows project conventions
+            4. Include error handling and edge cases
+            5. Suggest meaningful test cases
+            6. Keep changes minimal but complete
             
-            ## 输出格式
-            请用markdown格式输出详细的分析报告：
-            
-            ```markdown
-            # Issue #${ISSUE_NUMBER} 修复分析报告
-            
-            ## 🔍 问题诊断
-            [详细分析问题的根本原因]
-            
-            ## 📊 影响评估
-            - **严重程度**: [Low/Medium/High/Critical]
-            - **影响范围**: [描述影响的功能模块]
-            - **用户影响**: [描述对用户的影响]
-            
-            ## 🛠️ 修复策略
-            [详细描述修复策略和实施步骤]
-            
-            ## 💻 代码修改建议
-            
-            ### 文件1: [文件路径]
-            ```语言
-            // 修改前
-            [原始代码]
-            
-            // 修改后  
-            [修复后的代码]
-            ```
-            
-            ### 文件2: [如果有其他文件需要修改]
-            [类似格式]
-            
-            ## 🧪 测试建议
-            [建议的测试用例和验证方法]
-            
-            ## ⚠️ 注意事项
-            [实施修复时需要注意的事项]
-            
-            ## 🔄 后续建议
-            [长期改进建议]
-            ```
-            
-            请确保修复建议具体、可执行，代码建议符合项目的编程规范。
+            OUTPUT ONLY JSON - NO OTHER TEXT ALLOWED
 
-      # 步骤6: 创建修复分支
-      - name: 🌿 创建修复分支
+      # 步骤6: 确保从main分支创建修复分支
+      - name: 🌿 从main分支创建修复分支
         id: create_branch
         run: |
+          # 获取最新的main分支
+          git fetch origin main
+          git checkout main
+          git pull origin main
+          
+          # 创建修复分支
           BRANCH_NAME="fix/issue-${{ inputs.issue_number }}-$(date +%Y%m%d-%H%M%S)"
           echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
           
           git checkout -b "$BRANCH_NAME"
-          echo "✅ 创建修复分支: $BRANCH_NAME"
+          echo "✅ 从main分支创建修复分支: $BRANCH_NAME"
 
-      # 步骤7: 在Issue中发布修复分析报告
-      - name: 📝 发布修复分析报告
-        if: steps.ai_fix_analysis.outputs.summary != ''
+      # 步骤7: 解析AI修复方案并自动修改代码
+      - name: 🤖 自动应用代码修复
+        id: apply_fixes
+        env:
+          AI_RESPONSE: ${{ steps.ai_fix_analysis.outputs.summary }}
+        uses: actions/github-script@v6
+        with:
+          script: |-
+            const fs = require('fs');
+            const path = require('path');
+            
+            const aiResponse = process.env.AI_RESPONSE;
+            
+            core.info(`🤖 AI分析结果: ${aiResponse}`);
+            
+            let fixPlan;
+            let cleanedOutput = aiResponse;
+            
+            // 清理JSON输出
+            if (cleanedOutput) {
+              cleanedOutput = cleanedOutput.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+              cleanedOutput = cleanedOutput.trim();
+              if (!cleanedOutput.startsWith('{')) {
+                const jsonMatch = cleanedOutput.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  cleanedOutput = jsonMatch[0];
+                }
+              }
+            }
+            
+            try {
+              fixPlan = JSON.parse(cleanedOutput);
+              core.info(`✅ 成功解析修复方案`);
+            } catch (error) {
+              core.setFailed(`❌ JSON解析失败: ${error.message}`);
+              return;
+            }
+            
+            // 验证必要字段
+            if (!fixPlan.file_modifications || !Array.isArray(fixPlan.file_modifications)) {
+              core.setFailed('❌ AI响应缺少file_modifications字段');
+              return;
+            }
+            
+            let modifiedFiles = [];
+            let createdFiles = [];
+            let deletedFiles = [];
+            
+            // 处理每个文件修改
+            for (const mod of fixPlan.file_modifications) {
+              const filePath = mod.file_path;
+              
+              try {
+                if (mod.action === 'create') {
+                  // 创建新文件
+                  const dirPath = path.dirname(filePath);
+                  if (dirPath !== '.') {
+                    fs.mkdirSync(dirPath, { recursive: true });
+                  }
+                  fs.writeFileSync(filePath, mod.content || '');
+                  createdFiles.push(filePath);
+                  core.info(`✅ 创建文件: ${filePath}`);
+                  
+                } else if (mod.action === 'modify') {
+                  // 修改现有文件
+                  if (fs.existsSync(filePath)) {
+                    if (mod.old_content && mod.new_content) {
+                      // 替换特定内容
+                      let fileContent = fs.readFileSync(filePath, 'utf8');
+                      fileContent = fileContent.replace(mod.old_content, mod.new_content);
+                      fs.writeFileSync(filePath, fileContent);
+                    } else if (mod.content) {
+                      // 完全替换文件内容
+                      fs.writeFileSync(filePath, mod.content);
+                    }
+                    modifiedFiles.push(filePath);
+                    core.info(`✅ 修改文件: ${filePath}`);
+                  } else {
+                    core.warning(`⚠️ 要修改的文件不存在: ${filePath}`);
+                  }
+                  
+                } else if (mod.action === 'delete') {
+                  // 删除文件
+                  if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                    deletedFiles.push(filePath);
+                    core.info(`✅ 删除文件: ${filePath}`);
+                  } else {
+                    core.warning(`⚠️ 要删除的文件不存在: ${filePath}`);
+                  }
+                }
+              } catch (error) {
+                core.error(`❌ 处理文件 ${filePath} 时出错: ${error.message}`);
+              }
+            }
+            
+            // 设置输出变量
+            core.setOutput('modified_files', modifiedFiles.join(','));
+            core.setOutput('created_files', createdFiles.join(','));
+            core.setOutput('deleted_files', deletedFiles.join(','));
+            core.setOutput('commit_message', fixPlan.commit_message || `fix: resolve issue #${{ inputs.issue_number }}`);
+            core.setOutput('pr_description', fixPlan.pr_description || '');
+            core.setOutput('analysis', JSON.stringify(fixPlan.analysis || {}));
+            core.setOutput('test_suggestions', JSON.stringify(fixPlan.test_suggestions || []));
+            core.setOutput('additional_notes', fixPlan.additional_notes || '');
+            
+            const totalChanges = modifiedFiles.length + createdFiles.length + deletedFiles.length;
+            core.info(`🎯 修复完成: 修改${modifiedFiles.length}个文件, 创建${createdFiles.length}个文件, 删除${deletedFiles.length}个文件`);
+            
+            if (totalChanges === 0) {
+              core.warning('⚠️ 没有找到需要修改的文件');
+            }
+
+      # 步骤8: 自动提交代码更改
+      - name: 📝 提交代码修改
+        id: commit_changes
+        if: steps.apply_fixes.outputs.modified_files != '' || steps.apply_fixes.outputs.created_files != '' || steps.apply_fixes.outputs.deleted_files != ''
+        env:
+          COMMIT_MESSAGE: ${{ steps.apply_fixes.outputs.commit_message }}
+          BRANCH_NAME: ${{ steps.create_branch.outputs.branch_name }}
+        run: |
+          # 检查是否有变更
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "⚠️ 没有发现代码变更，跳过提交"
+            exit 0
+          fi
+          
+          # 添加所有变更
+          git add .
+          
+          # 显示变更概览
+          echo "📊 变更概览:"
+          git diff --cached --stat
+          
+          # 提交变更
+          git commit -m "${COMMIT_MESSAGE}"
+          
+          # 推送到远程分支
+          git push origin "${BRANCH_NAME}"
+          
+          echo "✅ 代码已提交并推送到分支: ${BRANCH_NAME}"
+
+      # 步骤9: 创建Pull Request
+      - name: 🔄 创建Pull Request
+        id: create_pr
+        if: steps.commit_changes.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ steps.create_branch.outputs.branch_name }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          ISSUE_TITLE: ${{ inputs.issue_title }}
+          PR_DESCRIPTION: ${{ steps.apply_fixes.outputs.pr_description }}
+          ANALYSIS: ${{ steps.apply_fixes.outputs.analysis }}
+          TEST_SUGGESTIONS: ${{ steps.apply_fixes.outputs.test_suggestions }}
+          ADDITIONAL_NOTES: ${{ steps.apply_fixes.outputs.additional_notes }}
+          MODIFIED_FILES: ${{ steps.apply_fixes.outputs.modified_files }}
+          CREATED_FILES: ${{ steps.apply_fixes.outputs.created_files }}
+          DELETED_FILES: ${{ steps.apply_fixes.outputs.deleted_files }}
+        run: |
+          # 构建PR描述
+          cat > /tmp/pr_description.md << 'EOF'
+          ## 🤖 AI自动修复: ${{ env.ISSUE_TITLE }}
+          
+          **修复Issue**: #${{ env.ISSUE_NUMBER }}
+          **修复分支**: `${{ env.BRANCH_NAME }}`
+          **修复时间**: $(date '+%Y-%m-%d %H:%M:%S')
+          
+          ### 📋 问题分析
+          
+          EOF
+          
+          # 添加AI分析结果
+          if [[ -n "${ANALYSIS}" && "${ANALYSIS}" != "{}" ]]; then
+            echo "${ANALYSIS}" | jq -r '
+              "**根本原因**: " + (.root_cause // "未提供") + "\n" +
+              "**严重程度**: " + (.severity // "未评估") + "\n" +
+              "**影响范围**: " + (.impact_scope // "未评估") + "\n" +
+              "**修复策略**: " + (.fix_strategy // "未提供")
+            ' >> /tmp/pr_description.md
+          fi
+          
+          # 添加变更文件列表
+          cat >> /tmp/pr_description.md << 'EOF'
+          
+          ### 📁 文件变更
+          
+          EOF
+          
+          if [[ -n "${MODIFIED_FILES}" ]]; then
+            echo "**修改的文件**:" >> /tmp/pr_description.md
+            echo "${MODIFIED_FILES}" | tr ',' '\n' | while read file; do
+              [[ -n "$file" ]] && echo "- 📝 \`$file\`" >> /tmp/pr_description.md
+            done
+            echo "" >> /tmp/pr_description.md
+          fi
+          
+          if [[ -n "${CREATED_FILES}" ]]; then
+            echo "**新建的文件**:" >> /tmp/pr_description.md
+            echo "${CREATED_FILES}" | tr ',' '\n' | while read file; do
+              [[ -n "$file" ]] && echo "- ✨ \`$file\`" >> /tmp/pr_description.md
+            done
+            echo "" >> /tmp/pr_description.md
+          fi
+          
+          if [[ -n "${DELETED_FILES}" ]]; then
+            echo "**删除的文件**:" >> /tmp/pr_description.md
+            echo "${DELETED_FILES}" | tr ',' '\n' | while read file; do
+              [[ -n "$file" ]] && echo "- 🗑️ \`$file\`" >> /tmp/pr_description.md
+            done
+            echo "" >> /tmp/pr_description.md
+          fi
+          
+          # 添加测试建议
+          if [[ -n "${TEST_SUGGESTIONS}" && "${TEST_SUGGESTIONS}" != "[]" ]]; then
+            cat >> /tmp/pr_description.md << 'EOF'
+          ### 🧪 测试建议
+          
+          EOF
+            echo "${TEST_SUGGESTIONS}" | jq -r '.[]' | while read suggestion; do
+              [[ -n "$suggestion" ]] && echo "- $suggestion" >> /tmp/pr_description.md
+            done
+            echo "" >> /tmp/pr_description.md
+          fi
+          
+          # 添加注意事项
+          if [[ -n "${ADDITIONAL_NOTES}" ]]; then
+            cat >> /tmp/pr_description.md << 'EOF'
+          ### ⚠️ 注意事项
+          
+          EOF
+            echo "${ADDITIONAL_NOTES}" >> /tmp/pr_description.md
+            echo "" >> /tmp/pr_description.md
+          fi
+          
+          # 添加AI修复说明
+          cat >> /tmp/pr_description.md << 'EOF'
+          
+          ### 🤖 AI修复说明
+          
+          - ✅ 此PR由AI智能助手自动生成
+          - 🔍 AI已分析问题并实施了修复方案
+          - 👀 **请仔细审查所有代码更改**
+          - 🧪 建议运行测试确保修复有效
+          - ✋ 如有疑问请在PR中评论讨论
+          
+          ---
+          *🤖 由智能问题修复器自动创建 | 请仔细审查后合并*
+          EOF
+          
+          # 创建PR
+          PR_URL=$(gh pr create \
+            --title "🤖 AI自动修复: ${ISSUE_TITLE}" \
+            --body-file /tmp/pr_description.md \
+            --head "${BRANCH_NAME}" \
+            --base main \
+            --label "ai-generated,needs-review" \
+            --assignee "@me")
+          
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "✅ Pull Request已创建: $PR_URL"
+
+      # 步骤10: 在Issue中发布修复完成通知
+      - name: 📝 发布修复完成通知
+        if: steps.create_pr.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
-          FIX_ANALYSIS: ${{ steps.ai_fix_analysis.outputs.summary }}
+          PR_URL: ${{ steps.create_pr.outputs.pr_url }}
           BRANCH_NAME: ${{ steps.create_branch.outputs.branch_name }}
+          ANALYSIS: ${{ steps.apply_fixes.outputs.analysis }}
+          MODIFIED_FILES: ${{ steps.apply_fixes.outputs.modified_files }}
+          CREATED_FILES: ${{ steps.apply_fixes.outputs.created_files }}
+          DELETED_FILES: ${{ steps.apply_fixes.outputs.deleted_files }}
         run: |
-          # 格式化分析报告
-          cat > /tmp/fix_report.md << 'EOF'
-          ## 🤖 AI自动修复分析报告
+          # 构建修复完成通知
+          cat > /tmp/fix_completion.md << 'EOF'
+          ## ✅ AI自动修复已完成！
           
-          我已经分析了这个问题，以下是详细的修复建议：
+          我已经成功分析了这个问题并**自动实施了代码修复**！
           
-          ${{ env.FIX_ANALYSIS }}
+          ### 🎯 修复概览
+          
+          EOF
+          
+          # 添加文件变更统计
+          MODIFIED_COUNT=$(echo "${MODIFIED_FILES}" | tr ',' '\n' | grep -v '^$' | wc -l)
+          CREATED_COUNT=$(echo "${CREATED_FILES}" | tr ',' '\n' | grep -v '^$' | wc -l)
+          DELETED_COUNT=$(echo "${DELETED_FILES}" | tr ',' '\n' | grep -v '^$' | wc -l)
+          
+          echo "- 📝 修改了 **${MODIFIED_COUNT}** 个文件" >> /tmp/fix_completion.md
+          echo "- ✨ 创建了 **${CREATED_COUNT}** 个文件" >> /tmp/fix_completion.md
+          echo "- 🗑️ 删除了 **${DELETED_COUNT}** 个文件" >> /tmp/fix_completion.md
+          echo "" >> /tmp/fix_completion.md
+          
+          # 添加AI分析摘要
+          if [[ -n "${ANALYSIS}" && "${ANALYSIS}" != "{}" ]]; then
+            echo "### 🔍 问题分析摘要" >> /tmp/fix_completion.md
+            echo "" >> /tmp/fix_completion.md
+            echo "${ANALYSIS}" | jq -r '
+              if .root_cause then "**根本原因**: " + .root_cause + "\n" else "" end +
+              if .severity then "**严重程度**: " + .severity + "\n" else "" end +
+              if .fix_strategy then "**修复策略**: " + .fix_strategy + "\n" else "" end
+            ' >> /tmp/fix_completion.md
+            echo "" >> /tmp/fix_completion.md
+          fi
+          
+          cat >> /tmp/fix_completion.md << 'EOF'
+          ### 🔄 Pull Request 已创建
+          
+          **PR链接**: ${{ env.PR_URL }}
+          **修复分支**: `${{ env.BRANCH_NAME }}`
+          
+          ### 👀 下一步操作
+          
+          1. **🔍 审查PR**: 点击上方链接查看所有代码更改
+          2. **🧪 运行测试**: 确保修复没有引入新问题
+          3. **✅ 合并代码**: 审查通过后合并PR
+          4. **🎉 关闭Issue**: 修复验证无误后关闭此Issue
+          
+          ### 🤖 AI修复说明
+          
+          - ✅ **自动化修复**: AI已自动修改代码并创建PR
+          - 🛡️ **安全保障**: 所有更改需要人工审查
+          - 🔧 **即时可用**: 修复已准备就绪，等待审查
+          - 📋 **详细记录**: PR中包含完整的修复说明
+          
+          > 💡 **提示**: 这是AI自动生成的修复方案，建议仔细审查后再合并。如有疑问请在PR中讨论！
           
           ---
-          
-          ### 📋 后续步骤
-          1. **审查建议**: 请仔细审查以上修复建议
-          2. **手动实施**: 根据建议手动实施代码修改
-          3. **创建PR**: 在分支 `${{ env.BRANCH_NAME }}` 上提交修改并创建PR
-          4. **测试验证**: 运行建议的测试用例验证修复效果
-          
-          ### 🔧 快速操作
-          ```bash
-          # 切换到修复分支
-          git checkout ${{ env.BRANCH_NAME }}
-          
-          # 实施修改后提交
-          git add .
-          git commit -m "fix: resolve issue #${{ inputs.issue_number }}"
-          git push origin ${{ env.BRANCH_NAME }}
-          ```
-          
-          > 💡 **提示**: 这是AI生成的修复建议，请在实施前仔细验证和测试。
+          *🤖 由智能问题修复器自动完成 | 已准备审查*
           EOF
           
           # 发布到Issue
-          gh issue comment "${{ env.ISSUE_NUMBER }}" --body-file /tmp/fix_report.md
+          gh issue comment "${{ env.ISSUE_NUMBER }}" --body-file /tmp/fix_completion.md
           
-          echo "✅ 修复分析报告已发布到Issue"
+          echo "✅ 修复完成通知已发布到Issue"
 
-      # 步骤8: 标记Issue状态
-      - name: 🏷️ 更新Issue标签
+      # 步骤11: 发布分析报告（如果PR创建失败）
+      - name: 📝 发布分析报告（备用）
+        if: steps.create_pr.outcome != 'success' && steps.ai_fix_analysis.outputs.summary != ''
         env:
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
+          BRANCH_NAME: ${{ steps.create_branch.outputs.branch_name }}
+          ANALYSIS: ${{ steps.apply_fixes.outputs.analysis }}
         run: |
-          # 添加"AI分析完成"标签
-          gh issue edit "${{ env.ISSUE_NUMBER }}" --add-label "ai-analyzed,needs-fix" || true
+          # 构建分析报告
+          cat > /tmp/analysis_report.md << 'EOF'
+          ## 🤖 AI修复分析报告
           
-          echo "✅ Issue标签已更新"
+          我已经分析了这个问题并尝试自动修复，但在创建PR时遇到了问题。以下是分析结果：
+          
+          EOF
+          
+          # 添加分析结果
+          if [[ -n "${ANALYSIS}" && "${ANALYSIS}" != "{}" ]]; then
+            echo "### 🔍 问题分析" >> /tmp/analysis_report.md
+            echo "" >> /tmp/analysis_report.md
+            echo "${ANALYSIS}" | jq -r '
+              if .root_cause then "**根本原因**: " + .root_cause + "\n\n" else "" end +
+              if .severity then "**严重程度**: " + .severity + "\n\n" else "" end +
+              if .impact_scope then "**影响范围**: " + .impact_scope + "\n\n" else "" end +
+              if .fix_strategy then "**修复策略**: " + .fix_strategy + "\n\n" else "" end
+            ' >> /tmp/analysis_report.md
+          fi
+          
+          cat >> /tmp/analysis_report.md << 'EOF'
+          
+          ### 📋 手动操作步骤
+          
+          由于自动PR创建失败，请手动完成以下步骤：
+          
+          1. **切换分支**: `git checkout ${{ env.BRANCH_NAME }}`
+          2. **查看更改**: `git diff main` 
+          3. **手动调整**: 根据AI分析结果进行代码修改
+          4. **提交更改**: `git add . && git commit -m "fix: resolve issue #${{ env.ISSUE_NUMBER }}"`
+          5. **推送分支**: `git push origin ${{ env.BRANCH_NAME }}`
+          6. **创建PR**: 在GitHub界面创建Pull Request
+          
+          ### 🔍 详细日志
+          
+          如需查看详细的执行日志，请参考: [Action执行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ---
+          *🤖 由智能问题修复器生成 | 需要手动完成*
+          EOF
+          
+          # 发布到Issue
+          gh issue comment "${{ env.ISSUE_NUMBER }}" --body-file /tmp/analysis_report.md
+          
+          echo "✅ 分析报告已发布到Issue"
 
-      # 步骤9: 失败处理
-      - name: ❌ 修复分析失败处理
+      # 步骤12: 更新Issue标签
+      - name: 🏷️ 更新Issue标签
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          PR_SUCCESS: ${{ steps.create_pr.outcome == 'success' }}
+        run: |
+          if [[ "${PR_SUCCESS}" == "true" ]]; then
+            # PR创建成功，添加相应标签
+            gh issue edit "${{ env.ISSUE_NUMBER }}" --add-label "ai-fixed,needs-review" --remove-label "needs-fix" || true
+            echo "✅ Issue标签已更新: ai-fixed, needs-review"
+          else
+            # PR创建失败或未执行，添加分析完成标签
+            gh issue edit "${{ env.ISSUE_NUMBER }}" --add-label "ai-analyzed,needs-manual-fix" || true
+            echo "✅ Issue标签已更新: ai-analyzed, needs-manual-fix"
+          fi
+
+      # 步骤13: 失败处理
+      - name: ❌ AI修复失败处理
         if: failure()
         env:
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token || secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
         run: |
-          gh issue comment "${{ env.ISSUE_NUMBER }}" --body "❌ **AI修复分析失败**
-
-          很抱歉，AI修复分析过程中遇到了问题。请检查以下可能的原因：
-
-          1. 问题描述可能不够详细
-          2. 缺少必要的错误日志或代码片段  
-          3. AI服务暂时不可用
-
-          **建议操作**:
-          - 提供更详细的问题描述和错误信息
-          - 手动分析和修复问题
-          - 稍后重试AI分析
-
-          > 🔍 查看详细错误信息请参考 [Action日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          # 发布失败通知
+          cat > /tmp/failure_notice.md << 'EOF'
+          ## ❌ AI自动修复失败
+          
+          很抱歉，AI修复过程中遇到了问题。可能的原因：
+          
+          ### 🔍 常见原因
+          1. **问题描述不够详细** - 缺少错误信息、代码片段或复现步骤
+          2. **代码库复杂度过高** - 项目结构复杂，AI难以准确分析
+          3. **API服务问题** - Gemini API暂时不可用或配置错误
+          4. **权限限制** - GitHub权限不足，无法修改代码或创建PR
+          
+          ### 🛠️ 建议操作
+          
+          #### 立即可以尝试：
+          - 📝 **补充问题描述**: 添加更多错误日志、代码片段、复现步骤
+          - 🔄 **重试修复**: 使用 `@abc fix this issue` 重新触发
+          - 📋 **简化问题**: 将复杂问题拆分为多个小问题
+          
+          #### 手动修复：
+          - 👨‍💻 **查看日志**: [详细执行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          - 🔧 **手动分析**: 基于问题描述进行人工分析
+          - 💡 **请求帮助**: @提及团队成员寻求支持
+          
+          ### 🤖 AI助手其他功能
+          
+          即使自动修复失败，您仍可以使用：
+          - `@abc 分析这个问题的原因` - 获取问题分析
+          - `@abc 给出修复建议` - 获取修复指导
+          - `@abc 如何重现这个问题` - 获取调试建议
+          
+          ---
+          *🤖 由智能问题修复器生成 | 可以重试或手动处理*
+          EOF
+          
+          gh issue comment "${{ env.ISSUE_NUMBER }}" --body-file /tmp/failure_notice.md
+          
+          # 添加失败标签
+          gh issue edit "${{ env.ISSUE_NUMBER }}" --add-label "ai-fix-failed,needs-help" || true
+          
+          echo "✅ 失败通知已发布到Issue"
 
 # ===============================================
 # 📋 使用说明
@@ -290,22 +661,50 @@ jobs:
 # 🎯 触发方式：
 #   在Issue或PR评论中使用: @abc fix this issue
 #
-# 📊 AI分析包括：
-#   - 问题根因分析
-#   - 修复策略制定  
-#   - 具体代码建议
-#   - 测试用例建议
+# 🤖 全自动修复流程：
+#   1. 从main分支拉取最新代码
+#   2. AI分析问题并生成修复方案
+#   3. 自动修改/创建/删除代码文件
+#   4. 自动提交代码更改
+#   5. 自动创建Pull Request
+#   6. 在Issue中发布修复完成通知
+#
+# 📊 AI分析能力：
+#   - 🔍 问题根因分析
+#   - 📋 修复策略制定
+#   - 💻 自动代码生成
+#   - 🧪 测试用例建议
+#   - 📝 详细修复文档
 #
 # 🔧 支持的修复类型：
-#   - bug: Bug修复
-#   - performance: 性能优化
+#   - bug: Bug修复和错误处理
+#   - performance: 性能优化和改进
 #   - security: 安全漏洞修复
-#   - enhancement: 功能增强
+#   - enhancement: 功能增强和扩展
 #
-# ⚡ 自动化功能：
-#   - 创建修复分支
-#   - 生成修复报告
-#   - 更新Issue标签
-#   - 提供操作指引
+# ⚡ 全自动化功能：
+#   - ✅ 自动代码修改 (增删改查)
+#   - 🌿 自动分支创建 (从main拉取)
+#   - 📝 自动代码提交和推送
+#   - 🔄 自动PR创建 (等待审查)
+#   - 🏷️ 智能标签管理
+#   - 📋 详细修复报告
+#   - 🛡️ 安全审查机制
+#
+# 🎯 完整示例：
+#   用户: "@abc fix this issue"
+#   AI: 
+#   1. 分析Issue中的错误描述
+#   2. 扫描项目代码结构
+#   3. 自动修改相关文件
+#   4. 提交并推送修复
+#   5. 创建PR等待审查
+#   6. 在Issue中报告完成状态
+#
+# 🛡️ 安全保障：
+#   - 所有代码更改需要人工审查
+#   - PR包含详细的修复说明
+#   - 智能标签标识AI生成内容
+#   - 完整的变更追踪和日志
 #
 # ===============================================

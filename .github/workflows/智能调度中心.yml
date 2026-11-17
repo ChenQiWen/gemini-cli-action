@@ -55,6 +55,8 @@ jobs:
       # 步骤1: 分析事件类型和用户意图
       - name: 🔍 分析事件和解析命令
         id: router
+        env:
+          COMMENT_TEXT: ${{ github.event.comment.body }}
         run: |
           echo "🎯 开始分析GitHub事件和用户意图..."
           
@@ -85,7 +87,7 @@ jobs:
               
             "issue_comment")
               # 检查评论内容中的命令
-              COMMENT_BODY="${{ github.event.comment.body }}"
+              COMMENT_BODY="$COMMENT_TEXT"
               echo "💬 分析评论内容: $COMMENT_BODY"
               
               if echo "$COMMENT_BODY" | grep -q "@abc"; then
